@@ -2,6 +2,9 @@
   "name": "hub-service",
   "module": "index.ts",
   "type": "module",
+  "scripts": {
+    "example": "bun example.ts"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },
