@@ -1,16 +1,22 @@
+import { sign } from './keychain'
+
 const defaultHubPort = Number(Bun.env.HUBPORT ?? 1997)
 export class Service {
   private id: number = 0
   port: number
-  ws: WebSocket | undefined
+  ws?: WebSocket
   requests = new ObjectMap<number, PendingRequest>()
   services = new Set<string>()
   api = new ObjectMap<string, (body: any) => any>()
   constructor(port: number = defaultHubPort) {
     this.port = port
   }
-  start() {
-    const ws = new WebSocket(`ws://127.0.0.1:${this.port}`)
+  async start() {
+    const auth = await sign()
+    const ws = new WebSocket(`ws://127.0.0.1:${this.port}`, {
+      // @ts-ignore (Bun issue)
+      headers: { auth },
+    })
     ws.onopen = async () => {
       this.ws = ws
       try {
