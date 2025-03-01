@@ -1,6 +1,6 @@
 import { sign } from './keychain'
 
-const defaultHubPort = Number(Bun.env.HUBPORT ?? 1997)
+const v = '0'
 export class Service {
   private id: number = 0
   port: number
@@ -15,7 +15,7 @@ export class Service {
     const auth = await sign()
     const ws = new WebSocket(`ws://127.0.0.1:${this.port}`, {
       // @ts-ignore (Bun issue)
-      headers: { auth },
+      headers: { auth, v },
     })
     ws.onopen = async () => {
       this.ws = ws
