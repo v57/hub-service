@@ -3,17 +3,17 @@ import { sign } from './keychain'
 const v = '0'
 export class Service {
   private id: number = 0
-  port: number
+  address: string
   ws?: WebSocket
   requests = new ObjectMap<number, PendingRequest>()
   services = new Set<string>()
   api = new ObjectMap<string, (body: any) => any>()
-  constructor(port: number = defaultHubPort) {
-    this.port = port
+  constructor(address: string | undefined) {
+    this.address = address ?? Bun.env.HUB ?? 'ws://localhost:1997'
   }
   async start() {
     const auth = await sign()
-    const ws = new WebSocket(`ws://127.0.0.1:${this.port}`, {
+    const ws = new WebSocket(this.address, {
       // @ts-ignore (Bun issue)
       headers: { auth, v },
     })
