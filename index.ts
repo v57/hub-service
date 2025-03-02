@@ -8,7 +8,7 @@ export class Service {
   requests = new ObjectMap<number, PendingRequest>()
   services = new Set<string>()
   api = new ObjectMap<string, (body: any) => any>()
-  constructor(address: string | undefined) {
+  constructor(address?: string) {
     this.address = address ?? Bun.env.HUB ?? 'ws://localhost:1997'
   }
   async start() {
