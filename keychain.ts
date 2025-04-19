@@ -17,6 +17,7 @@ async function loadKey(): Promise<string> {
     return key
   }
 }
+
 async function generateKey(): Promise<string> {
   const keys = crypto.generateKeyPairSync('ed25519', {
     privateKeyEncoding: { format: 'der', type: 'pkcs8' },
@@ -29,6 +30,7 @@ function getPublicKey(key: string): string {
     .subarray(48, 48 + 44)
     .toString('base64')
 }
+
 function makeSignature(key: string, data: string): string {
   const keyBuffer = Buffer.from(key, 'base64')
   const privateKey = crypto.createPrivateKey({
@@ -36,7 +38,6 @@ function makeSignature(key: string, data: string): string {
     format: 'der',
     type: 'pkcs8',
   })
-
-  const signature = crypto.sign('sha256', Buffer.from(data), privateKey)
+  const signature = crypto.sign(null, Buffer.from(data), privateKey)
   return signature.toString('base64')
 }
