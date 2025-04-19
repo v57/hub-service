@@ -19,7 +19,7 @@ export class Service {
     })
   }
   post(path: string, action: (body: any) => any) {
-    this.channel.post(path, action)
+    this.channel.post(path, ({ body }) => action(body))
     return this
   }
 }
