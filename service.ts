@@ -9,10 +9,9 @@ export class Service {
     this.address = address ?? Bun.env.HUB ?? 'ws://localhost:1997'
   }
   async start() {
-    const auth = await sign()
     const api = Object.keys(this.channel.postApi.storage)
     this.channel.connect(this.address, {
-      headers: () => ({ auth, v }),
+      headers: async () => ({ auth: await sign(), v }),
       async onConnect(sender) {
         await sender.send('hub/service/add', api)
       },
