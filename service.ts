@@ -3,10 +3,10 @@ import { Channel } from 'channel/client'
 const v = '0'
 export class Service {
   private id: number = 0
-  address: string
+  address: string | number
   channel = new Channel()
-  constructor(address?: string) {
-    this.address = address ?? Bun.env.HUB ?? 'ws://localhost:1997'
+  constructor(address?: string | number) {
+    this.address = address ?? Bun.env.HUB ?? 1997
   }
   async start() {
     const api = Object.keys(this.channel.postApi.storage)
