@@ -8,7 +8,7 @@ export class Service {
   constructor(address?: string | number) {
     this.address = address ?? Bun.env.HUB ?? 1997
   }
-  async start() {
+  start() {
     const api = Object.keys(this.channel.postApi.storage)
     this.channel.connect(this.address, {
       headers: async () => ({ auth: await sign(), v }),
