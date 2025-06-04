@@ -21,4 +21,8 @@ export class Service {
     this.channel.post(path, ({ body }) => action(body))
     return this
   }
+  stream(path: string, action: (body: any) => AsyncIterator<any, void, any>) {
+    this.channel.stream(path, ({ body }) => action(body))
+    return this
+  }
 }
