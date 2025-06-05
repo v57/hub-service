@@ -9,7 +9,7 @@ export class Service {
     this.address = address ?? Bun.env.HUB ?? 1997
   }
   start() {
-    const api = Object.keys(this.channel.postApi.storage)
+    const api = [...Object.keys(this.channel.postApi.storage), ...Object.keys(this.channel.streamApi.storage)]
     this.channel.connect(this.address, {
       headers: async () => ({ auth: await sign(), v }),
       async onConnect(sender) {
