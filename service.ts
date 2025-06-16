@@ -2,7 +2,6 @@ import { sign } from './keychain'
 import { Channel } from 'channel/client'
 const v = '0'
 export class Service {
-  private id: number = 0
   address: string | number
   channel = new Channel()
   constructor(address?: string | number) {
