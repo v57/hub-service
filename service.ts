@@ -13,7 +13,7 @@ export class Service {
     this.channel.connect(this.address, {
       headers: async () => ({ auth: await sign(), v }),
       async onConnect(sender) {
-        await sender.send('hub/service/add', api)
+        await sender.send('hub/service/update', { add: api })
       },
     })
   }
