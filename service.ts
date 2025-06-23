@@ -1,6 +1,7 @@
 import { sign } from './keychain'
 import { Channel } from 'channel/client'
 const v = '0'
+type AnyIterator = AsyncIterator<any, void, any> | Promise<AsyncIterator<any, void, any>>
 export class Service {
   address: string | number
   channel = new Channel()
@@ -16,11 +17,11 @@ export class Service {
       },
     })
   }
-  post(path: string, action: (body: any) => any) {
+  post(path: string, action: (body: any) => any | Promise<any>) {
     this.channel.post(path, ({ body }) => action(body))
     return this
   }
-  stream(path: string, action: (body: any) => AsyncIterator<any, void, any>) {
+  stream(path: string, action: (body: any) => AnyIterator) {
     this.channel.stream(path, ({ body }) => action(body))
     return this
   }
