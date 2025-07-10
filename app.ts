@@ -4,10 +4,14 @@ export class App {
   header: AppHeader
   body: AnyElement[]
   data: Record<string, string>
+  executableActions: ExecutableAction[] = []
   constructor(header: AppHeader, body: AnyElement[], data: Record<string, string> = {}) {
     this.header = header
     this.body = body
     this.data = data
+  }
+  actions(...actions: ExecutableAction[]) {
+    this.executableActions = actions
   }
 }
 
@@ -18,6 +22,9 @@ declare module '.' {
 }
 
 Service.prototype.app = function (app: App): Service {
+  for (const action of app.executableActions) {
+    this.post(action.header.path, action.execute)
+  }
   this.stream(app.header.path, async function* () {
     yield { header: app.header }
   })
@@ -67,6 +74,15 @@ interface Action {
   output?: string | Record<string, string>
 }
 
+interface ActionExecution {
+  execute: (body: any) => any | Promise<any>
+}
+
+interface ExecutableAction {
+  header: Action
+  execute: (body: any) => any | Promise<any>
+}
+
 export function textField(value: string, options: { placeholder?: string; action?: Action }): TextFieldElement {
   return {
     type: 'textField',
@@ -89,4 +105,14 @@ export function picker(options: string[], selected: string): PickerElement {
 }
 export function cell(title: AnyElement, subtitle: AnyElement): CellElement {
   return { type: 'cell', title, subtitle }
+}
+export function action(action: Action & ActionExecution): ExecutableAction {
+  return {
+    header: {
+      path: action.path,
+      body: action.body,
+      output: action.output,
+    },
+    execute: action.execute,
+  }
 }
