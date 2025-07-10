@@ -10,8 +10,9 @@ export class App {
     this.body = body
     this.data = data
   }
-  actions(...actions: ExecutableAction[]) {
+  actions(...actions: ExecutableAction[]): App {
     this.executableActions = actions
+    return this
   }
 }
 
@@ -26,7 +27,7 @@ Service.prototype.app = function (app: App): Service {
     this.post(action.header.path, action.execute)
   }
   this.stream(app.header.path, async function* () {
-    yield { header: app.header }
+    yield { header: app.header, body: app.body }
   })
   return this
 }
