@@ -1,4 +1,5 @@
-import { Service } from '.'
+import { Service } from './service'
+import type { AppHeader } from './service'
 
 export class App {
   header: AppHeader
@@ -23,6 +24,7 @@ declare module '.' {
 }
 
 Service.prototype.app = function (app: App): Service {
+  this.apps.push(app.header)
   for (const action of app.executableActions) {
     this.post(action.header.path, action.execute)
   }
@@ -30,11 +32,6 @@ Service.prototype.app = function (app: App): Service {
     yield { header: app.header, body: app.body }
   })
   return this
-}
-
-interface AppHeader {
-  name: string
-  path: string
 }
 
 type AnyElement = string | TextElement | TextFieldElement | ButtonElement | ListElement | PickerElement | CellElement
