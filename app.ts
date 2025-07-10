@@ -1,3 +1,5 @@
+import { Service } from '.'
+
 export class App {
   header: AppHeader
   body: AnyElement[]
@@ -7,6 +9,19 @@ export class App {
     this.body = body
     this.data = data
   }
+}
+
+declare module '.' {
+  interface Service {
+    app(app: App): Service
+  }
+}
+
+Service.prototype.app = function (app: App): Service {
+  this.stream(app.header.path, async function* () {
+    yield { header: app.header }
+  })
+  return this
 }
 
 interface AppHeader {
