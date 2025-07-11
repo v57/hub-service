@@ -16,7 +16,7 @@ export class Service {
     this.channel.connect(this.address, {
       headers: async () => ({ auth: await sign(), v }),
       async onConnect(sender) {
-        await sender.send('hub/service/update', { add: api, apps })
+        await sender.send('hub/service/update', { add: api, addApps: apps })
       },
     })
   }
