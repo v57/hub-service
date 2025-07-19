@@ -34,7 +34,15 @@ Service.prototype.app = function (app: App): Service {
   return this
 }
 
-type AnyElement = string | TextElement | TextFieldElement | ButtonElement | ListElement | PickerElement | CellElement
+type AnyElement =
+  | string
+  | TextElement
+  | TextFieldElement
+  | ButtonElement
+  | ListElement
+  | PickerElement
+  | CellElement
+  | FilesElement
 interface TextElement {
   type: 'text'
   value: string
@@ -65,6 +73,12 @@ interface CellElement {
   type: 'cell'
   title: AnyElement
   subtitle?: AnyElement
+}
+interface FilesElement {
+  type: 'files'
+  value: string
+  title: AnyElement
+  action?: Action
 }
 interface Action {
   path: string
@@ -103,6 +117,9 @@ export function picker(options: string[], selected: string): PickerElement {
 }
 export function cell(title: AnyElement, subtitle: AnyElement): CellElement {
   return { type: 'cell', title, subtitle }
+}
+export function files(value: string, title: AnyElement, action: Action): FilesElement {
+  return { type: 'files', value, title, action }
 }
 export function action(action: Action & ActionExecution): ExecutableAction {
   return {
