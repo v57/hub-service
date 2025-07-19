@@ -43,6 +43,7 @@ type AnyElement =
   | PickerElement
   | CellElement
   | FilesElement
+  | FileOperationElement
 interface TextElement {
   type: 'text'
   value: string
@@ -76,6 +77,12 @@ interface CellElement {
 }
 interface FilesElement {
   type: 'files'
+  value: string
+  title: AnyElement
+  action?: Action
+}
+interface FileOperationElement {
+  type: 'fileOperation'
   value: string
   title: AnyElement
   action?: Action
@@ -120,6 +127,9 @@ export function cell(title: AnyElement, subtitle: AnyElement): CellElement {
 }
 export function files(value: string, title: AnyElement, action: Action): FilesElement {
   return { type: 'files', value, title, action }
+}
+export function fileOperation(value: string, title: AnyElement, action: Action): FileOperationElement {
+  return { type: 'fileOperation', value, title, action }
 }
 export function action(action: Action & ActionExecution): ExecutableAction {
   return {
