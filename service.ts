@@ -15,15 +15,17 @@ export class Service {
   start() {
     const services: ServiceHeader[] = []
     for (const path of Object.keys(this.channel.postApi.storage)) {
+      const settings = this.settings[path] ?? {}
       services.push({
         path,
-        settings: this.settings[path],
+        permissions: settings.permissions,
       })
     }
     for (const path of Object.keys(this.channel.streamApi.storage)) {
+      const settings = this.settings[path] ?? {}
       services.push({
         path,
-        settings: this.settings[path],
+        permissions: settings.permissions,
       })
     }
     const apps = this.apps
@@ -69,7 +71,6 @@ export interface ServicePermissions {
   allows?: boolean
 }
 
-interface ServiceHeader {
+interface ServiceHeader extends ApiSettings {
   path: string
-  settings: ApiSettings
 }
