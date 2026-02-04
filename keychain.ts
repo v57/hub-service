@@ -1,4 +1,4 @@
-import crypto from 'crypto'
+import { generateKeyPairSync, createPrivateKey, sign as signData } from 'crypto'
 
 let privateKey: string | undefined
 export async function sign(expires: number = 10) {
@@ -27,7 +27,7 @@ async function loadKey(): Promise<string> {
 }
 
 async function generateKey(): Promise<string> {
-  const keys = crypto.generateKeyPairSync('ed25519', {
+  const keys = generateKeyPairSync('ed25519', {
     privateKeyEncoding: { format: 'der', type: 'pkcs8' },
     publicKeyEncoding: { format: 'der', type: 'spki' },
   })
@@ -41,11 +41,11 @@ function getPublicKey(key: string): string {
 
 function makeSignature(key: string, data: string): string {
   const keyBuffer = Buffer.from(key, 'base64')
-  const privateKey = crypto.createPrivateKey({
+  const privateKey = createPrivateKey({
     key: keyBuffer.subarray(0, 48), // Extract private key
     format: 'der',
     type: 'pkcs8',
   })
-  const signature = crypto.sign(null, Buffer.from(data), privateKey)
+  const signature = signData(null, Buffer.from(data), privateKey)
   return signature.toString('base64')
 }
