@@ -1,5 +1,6 @@
 import crypto from 'crypto'
 
+let privateKey: string | undefined
 export async function sign(expires: number = 10) {
   const key = await loadKey()
   const publicKey = getPublicKey(key)
@@ -9,12 +10,15 @@ export async function sign(expires: number = 10) {
 }
 
 async function loadKey(): Promise<string> {
+  if (privateKey) return privateKey
   try {
-    return await Bun.file('auth').text()
-  } catch {
-    const key = await generateKey()
-    await Bun.file('auth').write(key)
+    const key = await Bun.file('auth').text()
+    privateKey = key
     return key
+  } catch {
+    const privateKey = await generateKey()
+    await Bun.file('auth').write(privateKey)
+    return privateKey
   }
 }
 
