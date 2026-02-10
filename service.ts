@@ -9,8 +9,14 @@ export class Service {
   apps: AppHeader[] = []
   group?: string
   settings: Record<string, ApiSettings> = {}
-  constructor(address?: string | number) {
-    this.address = address ?? Bun.env.HUB ?? 1997
+  profile?: Profile
+  constructor(options?: ServiceOptions) {
+    this.address = options?.address ?? Bun.env.HUB ?? 1997
+    if (options?.name || options?.icon) {
+      this.profile = {}
+      if (options.name) this.profile.name = options.name
+      if (options.icon) this.profile.icon = options.icon
+    }
   }
   start() {
     const services: ServiceHeader[] = []
@@ -29,9 +35,14 @@ export class Service {
       })
     }
     const apps = this.apps
+    const getProfile = () => this.profile
     this.channel.connect(this.address, {
       headers: async () => ({ auth: await sign(), v }),
       async onConnect(sender) {
+        try {
+          const profile = getProfile()
+          if (profile) await sender.send('hub/profile/update', profile)
+        } catch {}
         await sender.send('hub/service/update', { services, apps })
       },
     })
@@ -55,6 +66,11 @@ export class Service {
     }
   }
 }
+export interface ServiceOptions {
+  address?: string | number
+  name?: string
+  icon?: Icon
+}
 export interface AppHeader {
   type: 'app'
   name: string
@@ -73,4 +89,27 @@ export interface ServicePermissions {
 
 interface ServiceHeader extends ApiSettings {
   path: string
+}
+
+export interface Profile {
+  name?: string
+  icon?: Icon
+}
+export interface Icon {
+  symbol?: SFSymbol
+  text?: TextIcon
+}
+interface SFSymbol {
+  name: string
+  color?: Color
+}
+interface TextIcon {
+  name: string
+  color?: Color
+}
+interface Color {
+  background?: string
+  backgroundDark?: string
+  foreground?: string
+  foregroundDark?: string
 }
