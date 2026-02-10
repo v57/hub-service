@@ -93,11 +93,11 @@ interface ServiceHeader extends ApiSettings {
 
 export interface Profile {
   name?: string
-  icon?: Icon
+  icon?: Icon | string
 }
 export interface Icon {
-  symbol?: SFSymbol
-  text?: TextIcon
+  symbol?: SFSymbol | string
+  text?: TextIcon | string
 }
 interface SFSymbol {
   name: string
