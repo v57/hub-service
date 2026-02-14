@@ -1,15 +1,23 @@
 import { Service } from './service'
 import type { AppHeader } from './service'
+import { LazyState } from 'channel/more'
 
 export class App {
   header: AppHeader
   body: AnyElement[]
   data: Record<string, string>
+  state?: LazyState<{ body?: AnyElement[]; data?: Record<string, string> }>
   executableActions: ExecutableAction[] = []
-  constructor(header: AppHeader, body: AnyElement[], data: Record<string, string> = {}) {
+  constructor(
+    header: AppHeader,
+    body: AnyElement[],
+    data: Record<string, string> = {},
+    state?: LazyState<{ body?: AnyElement[]; data?: Record<string, string> }>,
+  ) {
     this.header = header
     this.body = body
     this.data = data
+    this.state = state
   }
   actions(...actions: ExecutableAction[]): App {
     this.executableActions = actions
@@ -25,16 +33,22 @@ declare module '.' {
 
 Service.prototype.app = function (app: App): Service {
   this.apps.push(app.header)
+  const state = app.state
   for (const action of app.executableActions) {
     this.post(action.header.path, action.execute)
   }
   this.stream(app.header.path, async function* () {
-    yield { header: app.header, body: app.body }
+    yield { header: app.header, body: app.body, data: app.data }
+    if (state) {
+      for await (const event of state.makeIterator()) {
+        yield event
+      }
+    }
   })
   return this
 }
 
-type AnyElement =
+export type AnyElement =
   | string
   | TextElement
   | TextFieldElement
