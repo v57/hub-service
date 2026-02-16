@@ -19,7 +19,7 @@ export class Service {
       if (options.icon) this.profile.icon = options.icon
     }
   }
-  start() {
+  start(): this {
     const services: ServiceHeader[] = []
     for (const path of Object.keys(this.channel.postApi.storage)) {
       const settings = this.settings[path] ?? {}
@@ -47,6 +47,7 @@ export class Service {
         await sender.send('hub/service/update', { services, apps })
       },
     })
+    return this
   }
   post(path: string, action: (body: any) => any | Promise<any>, settings?: ApiSettings) {
     this.addSettings(path, settings)
