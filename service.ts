@@ -1,11 +1,12 @@
 import { sign } from './keychain'
-import { Channel } from 'channel/client'
+import { Channel, type Sender } from 'channel/client'
 const v = '0'
 type AnyIterator = AsyncIterator<any, void, any> | Promise<AsyncIterator<any, void, any>>
 
 export class Service {
   address: string | number
   channel = new Channel()
+  sender?: Sender
   apps: AppHeader[] = []
   group?: string
   settings: Record<string, ApiSettings> = {}
@@ -36,7 +37,7 @@ export class Service {
     }
     const apps = this.apps
     const getProfile = () => this.profile
-    this.channel.connect(this.address, {
+    this.sender = this.channel.connect(this.address, {
       headers: async () => ({ auth: await sign(), v }),
       async onConnect(sender) {
         try {
@@ -56,6 +57,14 @@ export class Service {
     this.addSettings(path, settings)
     this.channel.stream(path, ({ body }) => action(body))
     return this
+  }
+  send(path: string, body?: any, context?: any) {
+    if (!this.sender) throw 'Service not started'
+    return this.sender.send(path, body, context)
+  }
+  values(path: string, body?: any, context?: any) {
+    if (!this.sender) throw 'Service not started'
+    return this.sender.values(path, body, context)
   }
   private addSettings(path: string, settings: ApiSettings | undefined) {
     if (!settings) return
