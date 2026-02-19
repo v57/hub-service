@@ -12,7 +12,7 @@ export class Service {
   settings: Record<string, ApiSettings> = {}
   profile?: Profile
   constructor(options?: ServiceOptions) {
-    this.address = options?.address ?? Bun.env.HUB ?? 1997
+    this.address = options?.address ?? (typeof Bun !== 'undefined' ? Bun?.env?.HUB : undefined) ?? 1997
     if (options?.name || options?.icon) {
       this.profile = {}
       if (options.name) this.profile.name = options.name
