@@ -1,9 +1,8 @@
-import { sign } from './keychain'
 import { Channel, type Sender } from 'channel/client'
 const v = '0'
 type AnyIterator = AsyncIterator<any, void, any> | Promise<AsyncIterator<any, void, any>>
 
-export class Service {
+export class MultiplatformService {
   address: string | number
   channel = new Channel()
   sender?: Sender
@@ -11,7 +10,9 @@ export class Service {
   group?: string
   settings: Record<string, ApiSettings> = {}
   profile?: Profile
-  constructor(options?: ServiceOptions) {
+  sign: () => Promise<string>
+  constructor(sign: () => Promise<string>, options?: ServiceOptions) {
+    this.sign = sign
     this.address = options?.address ?? (typeof Bun !== 'undefined' ? Bun?.env?.HUB : undefined) ?? 1997
     if (options?.name || options?.icon) {
       this.profile = {}
@@ -38,7 +39,7 @@ export class Service {
     const apps = this.apps
     const getProfile = () => this.profile
     this.sender = this.channel.connect(this.address, {
-      headers: async () => ({ auth: await sign(), v }),
+      headers: async () => ({ auth: await this.sign(), v }),
       async onConnect(sender) {
         try {
           const profile = getProfile()
