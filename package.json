@@ -6,7 +6,7 @@
     "example": "bun example.ts"
   },
   "devDependencies": {
-    "@types/bun": "^1.2.17"
+    "@types/bun": "^1.3.9"
   },
   "peerDependencies": {
     "typescript": "^5.8.3"
