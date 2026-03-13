@@ -13,7 +13,7 @@ export class MultiplatformService {
   sign: () => Promise<string>
   constructor(sign: () => Promise<string>, options?: ServiceOptions) {
     this.sign = sign
-    this.address = options?.address ?? (typeof Bun !== 'undefined' ? Bun?.env?.HUB : undefined) ?? 1997
+    this.address = options?.address ?? globalThis.Bun?.env?.HUB ?? 1997
     if (options?.name || options?.icon) {
       this.profile = {}
       if (options.name) this.profile.name = options.name

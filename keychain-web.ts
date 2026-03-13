@@ -1,6 +1,12 @@
 const textEncoder = new TextEncoder()
 let privateKey: string | undefined
 let memoryKey: string | undefined
+type RuntimeWithBuffer = typeof globalThis & {
+  Buffer?: {
+    from(value: string, encoding?: string): Uint8Array<ArrayBufferLike>
+    from(value: ArrayBufferLike | ArrayLike<number>, encoding?: string): { toString(encoding?: string): string }
+  }
+}
 
 export async function sign(expires: number = 10) {
   const key = await loadKey()
@@ -47,9 +53,10 @@ function getPublicKey(key: string): string {
 async function makeSignature(key: string, data: string): Promise<string> {
   const keyBuffer = fromBase64(key)
   const publicLength = getPublicLength(keyBuffer)
+  const privateKeyBytes = new Uint8Array(keyBuffer.subarray(0, keyBuffer.length - publicLength))
   const privateKey = await getSubtleCrypto().importKey(
     'pkcs8',
-    keyBuffer.subarray(0, keyBuffer.length - publicLength),
+    privateKeyBytes,
     { name: 'Ed25519' },
     false,
     ['sign'],
@@ -69,7 +76,8 @@ function getSubtleCrypto(): SubtleCrypto {
 }
 
 function fromBase64(value: string): Uint8Array {
-  if (typeof Buffer !== 'undefined') return new Uint8Array(Buffer.from(value, 'base64'))
+  const buffer = (globalThis as RuntimeWithBuffer).Buffer
+  if (buffer) return new Uint8Array(buffer.from(value, 'base64'))
   if (typeof atob === 'undefined') throw 'Base64 decode unavailable'
   const decoded = atob(value)
   const bytes = new Uint8Array(decoded.length)
@@ -78,7 +86,8 @@ function fromBase64(value: string): Uint8Array {
 }
 
 function encodeBase64(value: Uint8Array): string {
-  if (typeof Buffer !== 'undefined') return Buffer.from(value).toString('base64')
+  const buffer = (globalThis as RuntimeWithBuffer).Buffer
+  if (buffer) return buffer.from(value).toString('base64')
   if (typeof btoa === 'undefined') throw 'Base64 encode unavailable'
   let output = ''
   for (const byte of value) output += String.fromCharCode(byte)
