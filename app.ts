@@ -1,21 +1,39 @@
-import { Service } from './service'
+import { Service } from '.'
 import type { AppHeader } from './service'
 import { LazyState } from 'channel/more'
+
+export interface AppInterface {
+  header?: AppHeader
+  body?: AnyElement[]
+  top?: AnyElement
+  bottom?: AnyElement
+  data?: Record<string, unknown>
+}
+
+interface AppOptions {
+  top?: AnyElement
+  bottom?: AnyElement
+}
 
 export class App {
   header: AppHeader
   body: AnyElement[]
-  data: Record<string, string>
-  state?: LazyState<{ body?: AnyElement[]; data?: Record<string, string> }>
+  top?: AnyElement
+  bottom?: AnyElement
+  data: Record<string, unknown>
+  state?: LazyState<AppInterface>
   executableActions: ExecutableAction[] = []
   constructor(
     header: AppHeader,
     body: AnyElement[],
-    data: Record<string, string> = {},
-    state?: LazyState<{ body?: AnyElement[]; data?: Record<string, string> }>,
+    data: Record<string, unknown> = {},
+    state?: LazyState<AppInterface>,
+    options: AppOptions = {},
   ) {
     this.header = header
     this.body = body
+    this.top = options.top
+    this.bottom = options.bottom
     this.data = data
     this.state = state
   }
@@ -38,7 +56,7 @@ Service.prototype.app = function (app: App): Service {
     this.post(action.header.path, action.execute)
   }
   this.stream(app.header.path, async function* () {
-    yield { header: app.header, body: app.body, data: app.data }
+    yield { header: app.header, body: app.body, top: app.top, bottom: app.bottom, data: app.data }
     if (state) {
       for await (const event of state.makeIterator()) {
         yield event
@@ -51,17 +69,29 @@ Service.prototype.app = function (app: App): Service {
 export type AnyElement =
   | string
   | TextElement
+  | ProgressElement
   | TextFieldElement
   | ButtonElement
+  | SliderElement
   | ListElement
   | PickerElement
   | CellElement
   | FilesElement
   | FileOperationElement
+  | HStackElement
+  | VStackElement
+  | ZStackElement
+  | SpacerElement
 interface TextElement {
   type: 'text'
   value: string
   secondary?: boolean
+}
+interface ProgressElement {
+  type: 'progress'
+  value: string
+  min?: number
+  max?: number
 }
 interface TextFieldElement {
   type: 'textField'
@@ -74,10 +104,19 @@ interface ButtonElement {
   title: string
   action: Action
 }
+interface SliderElement {
+  type: 'slider'
+  value: string
+  defaultValue?: number
+  min?: number
+  max?: number
+  step?: number
+  action?: Action
+}
 interface ListElement {
   type: 'list'
   data: string
-  cell: AnyElement
+  content: AnyElement
 }
 interface PickerElement {
   type: 'picker'
@@ -86,20 +125,37 @@ interface PickerElement {
 }
 interface CellElement {
   type: 'cell'
-  title: AnyElement
+  title?: AnyElement
   subtitle?: AnyElement
 }
 interface FilesElement {
   type: 'files'
   value: string
-  title: AnyElement
-  action?: Action
+  title?: AnyElement
+  action: Action
 }
 interface FileOperationElement {
   type: 'fileOperation'
-  value: string
-  title: AnyElement
-  action?: Action
+  format?: string
+  title?: AnyElement
+  action: Action
+}
+interface HStackElement {
+  type: 'hstack'
+  content: AnyElement[]
+  spacing?: number
+}
+interface VStackElement {
+  type: 'vstack'
+  content: AnyElement[]
+  spacing?: number
+}
+interface ZStackElement {
+  type: 'zstack'
+  content: AnyElement[]
+}
+interface SpacerElement {
+  type: 'spacer'
 }
 interface Action {
   path: string
@@ -116,7 +172,7 @@ interface ExecutableAction {
   execute: (body: any) => any | Promise<any>
 }
 
-export function textField(value: string, options: { placeholder?: string; action?: Action }): TextFieldElement {
+export function textField(value: string, options: { placeholder?: string; action?: Action } = {}): TextFieldElement {
   return {
     type: 'textField',
     value,
@@ -127,23 +183,71 @@ export function textField(value: string, options: { placeholder?: string; action
 export function text(value: string): string {
   return value
 }
+export function progress(value: string, options: { min?: number; max?: number } = {}): ProgressElement {
+  const element: ProgressElement = { type: 'progress', value }
+  if (options.min !== undefined) element.min = options.min
+  if (options.max !== undefined) element.max = options.max
+  return element
+}
 export function button(title: string, action: Action): ButtonElement {
   return { type: 'button', title, action }
 }
-export function list(data: string, cell: AnyElement): ListElement {
-  return { type: 'list', data, cell }
+export function slider(
+  value: string,
+  options: {
+    defaultValue?: number
+    min?: number
+    max?: number
+    step?: number
+    action?: Action
+  } = {},
+): SliderElement {
+  const element: SliderElement = { type: 'slider', value }
+  if (options.defaultValue !== undefined) element.defaultValue = options.defaultValue
+  if (options.min !== undefined) element.min = options.min
+  if (options.max !== undefined) element.max = options.max
+  if (options.step !== undefined) element.step = options.step
+  if (options.action !== undefined) element.action = options.action
+  return element
+}
+export function list(data: string, content: AnyElement): ListElement {
+  return { type: 'list', data, content }
 }
 export function picker(options: string[], selected: string): PickerElement {
   return { type: 'picker', options, selected }
 }
-export function cell(title: AnyElement, subtitle: AnyElement): CellElement {
-  return { type: 'cell', title, subtitle }
+export function cell(title?: AnyElement, subtitle?: AnyElement): CellElement {
+  const element: CellElement = { type: 'cell' }
+  if (title !== undefined) element.title = title
+  if (subtitle !== undefined) element.subtitle = subtitle
+  return element
 }
-export function files(value: string, title: AnyElement, action: Action): FilesElement {
-  return { type: 'files', value, title, action }
+export function files(value: string, title: AnyElement | undefined, action: Action): FilesElement {
+  const element: FilesElement = { type: 'files', value, action }
+  if (title !== undefined) element.title = title
+  return element
 }
-export function fileOperation(value: string, title: AnyElement, action: Action): FileOperationElement {
-  return { type: 'fileOperation', value, title, action }
+export function fileOperation(format: string, title: AnyElement | undefined, action: Action): FileOperationElement {
+  const element: FileOperationElement = { type: 'fileOperation', action }
+  if (format !== undefined) element.format = format
+  if (title !== undefined) element.title = title
+  return element
+}
+export function hstack(content: AnyElement[], options: { spacing?: number } = {}): HStackElement {
+  const element: HStackElement = { type: 'hstack', content }
+  if (options.spacing !== undefined) element.spacing = options.spacing
+  return element
+}
+export function vstack(content: AnyElement[], options: { spacing?: number } = {}): VStackElement {
+  const element: VStackElement = { type: 'vstack', content }
+  if (options.spacing !== undefined) element.spacing = options.spacing
+  return element
+}
+export function zstack(content: AnyElement[]): ZStackElement {
+  return { type: 'zstack', content }
+}
+export function spacer(): SpacerElement {
+  return { type: 'spacer' }
 }
 export function action(action: Action & ActionExecution): ExecutableAction {
   return {
