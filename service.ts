@@ -1,6 +1,16 @@
+import type { SendOptions } from 'channel/channel'
 import { Channel, type Sender } from 'channel/client'
 const v = '0'
 type AnyIterator = AsyncIterator<any, void, any> | Promise<AsyncIterator<any, void, any>>
+
+export interface Context {
+  service?: string
+}
+
+export interface ServiceProvider {
+  id: string
+  name?: string
+}
 
 export class MultiplatformService {
   address: string | number
@@ -60,13 +70,13 @@ export class MultiplatformService {
     this.channel.stream(path, ({ body }) => action(body))
     return this
   }
-  send(path: string, body?: any, context?: any) {
+  send(path: string, body?: any, options?: SendOptions) {
     if (!this.sender) throw 'Service not started'
-    return this.sender.send(path, body, context)
+    return this.sender.send(path, body, options)
   }
-  values(path: string, body?: any, context?: any) {
+  values(path: string, body?: any, options?: SendOptions) {
     if (!this.sender) throw 'Service not started'
-    return this.sender.values(path, body, context)
+    return this.sender.values(path, body, options)
   }
   private addSettings(path: string, settings: ApiSettings | undefined) {
     if (!settings) return
