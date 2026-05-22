@@ -37,6 +37,7 @@ export class MultiplatformService {
       services.push({
         path,
         permissions: settings.permissions,
+        limit: settings.limit,
       })
     }
     for (const path of Object.keys(this.channel.streamApi.storage)) {
@@ -44,6 +45,7 @@ export class MultiplatformService {
       services.push({
         path,
         permissions: settings.permissions,
+        limit: settings.limit,
       })
     }
     const apps = this.apps
@@ -99,6 +101,7 @@ export interface AppHeader {
 }
 export interface ApiSettings {
   permissions?: ServicePermissions
+  limit?: number
 }
 export interface ServicePermissions {
   group?: string
