@@ -218,7 +218,7 @@ Each one is built on the Channel port for its language and is checked against a 
 | C# | [hub-service-cs](https://github.com/v57/hub-service-cs) | yes |
 | Dart | [hub-service-dart](https://github.com/v57/hub-service-dart) | yes |
 | Elixir | [hub_service_ex](https://github.com/v57/hub_service_ex) | yes |
-| Go | [hub-service-go](https://github.com/v57/hub-service-go) | no, Hub Lite only |
+| Go | [hub-service-go](https://github.com/v57/hub-service-go) | yes |
 | Java | [hub-service-java](https://github.com/v57/hub-service-java) | yes |
 | Kotlin | [hub-service-kotlin](https://github.com/v57/hub-service-kotlin) | yes |
 | PHP | [hub-service-php](https://github.com/v57/hub-service-php) | yes |
