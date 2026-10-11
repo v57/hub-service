@@ -3,6 +3,8 @@
   &nbsp;service.ts
 </h1>
 
+Full documentation, including apps and the other 13 languages: [docs](docs/README.md).
+
 # Usage
 
 ## Start hub process
