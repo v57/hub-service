@@ -1,15 +1,17 @@
 // App interface check: verifies a hub app path streams an AppInterface with a
-// matching header. Usage: bun hub-service/tests/appcheck.ts <appPath> <name>
+// matching header. Usage: bun hub-service/tests/appcheck.ts <appPath> <name> [port]
+// Port defaults to 1997, or PORT env.
 import { Channel } from 'channel/client'
 
-const [appPath, name = ''] = process.argv.slice(2)
+const [appPath, name = '', portArg] = process.argv.slice(2)
+const port = Number(portArg ?? process.env.PORT ?? 1997)
 if (!appPath) {
-  console.error('usage: appcheck.ts <appPath> [name]')
+  console.error('usage: appcheck.ts <appPath> [name] [port]')
   process.exit(2)
 }
 
 const ch = new Channel()
-const sender = ch.connect(1997)
+const sender = ch.connect(port)
 const values = sender.values(appPath)
 const first = await values.next()
 if (first.done) {
