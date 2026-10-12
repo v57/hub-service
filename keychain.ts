@@ -2,13 +2,22 @@ import { generateKeyPairSync, createPrivateKey, sign as signData } from 'crypto'
 
 let privateKey: string | undefined
 export async function sign(expires: number = 10) {
-  const key = await loadKey()
-  const publicKey = getPublicKey(key)
+  const publicKey = await getServicePublicKey()
   const data = `${Math.round(new Date().getTime() / 1000) + expires}`
-  const signature = makeSignature(key, data)
+  const signature = await signChallenge(data)
   return `key.${publicKey}.${signature}.${data}`
 }
+
+/** Sign arbitrary challenge data with existing service identity. */
+export async function signChallenge(challenge: string): Promise<string> {
+  return makeSignature(await loadKey(), challenge)
+}
+
 export async function publicKey(): Promise<string> {
+  return getServicePublicKey()
+}
+
+async function getServicePublicKey(): Promise<string> {
   const key = await loadKey()
   return getPublicKey(key)
 }

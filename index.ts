@@ -1,10 +1,11 @@
-import { MultiplatformService, type ServiceOptions } from './service'
+import { NetworkService, type ServiceOptions } from './service'
 export type { Context, ServiceProvider } from './service'
-export { publicKey } from './keychain'
-import { sign } from './keychain'
+export * from './network'
+export { publicKey, signChallenge } from './keychain'
+import { publicKey, sign, signChallenge } from './keychain'
 
-export class Service extends MultiplatformService {
+export class Service extends NetworkService {
   constructor(options?: ServiceOptions) {
-    super(() => sign(), options)
+    super(() => sign(), signChallenge, () => publicKey(), options)
   }
 }
