@@ -188,3 +188,7 @@ AGENTS.md
 .commandcode/
 .hermes/
 KANBAN*.md
+
+# Throwaway probes
+tests/.tmp-*
+tests/*-tmp.ts
