@@ -21,13 +21,13 @@ interface SharesReplaceFixture {
 }
 
 const fixturePath = fileURLToPath(
-  new URL('../hub-service-go/protocol/testdata/v1/shares-replace.json', import.meta.url),
+  new URL('./testdata/hub-network-v1/shares-replace.json', import.meta.url),
 )
 const invitationFixturePath = fileURLToPath(
-  new URL('../hub-service-go/protocol/testdata/v1/invitation.json', import.meta.url),
+  new URL('./testdata/hub-network-v1/invitation.json', import.meta.url),
 )
 const gatewayFixturePath = fileURLToPath(
-  new URL('../hub-service-go/protocol/testdata/v1/gateway.json', import.meta.url),
+  new URL('./testdata/hub-network-v1/gateway.json', import.meta.url),
 )
 
 interface InvitationFixture {
