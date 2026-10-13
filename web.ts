@@ -1,6 +1,6 @@
 import { MultiplatformService, type ServiceOptions } from './service'
 export type { Context, ServiceProvider } from './service'
-export { publicKey } from './keychain-web'
+export { publicKey, signChallenge } from './keychain-web'
 import { sign } from './keychain-web'
 
 export class Service extends MultiplatformService {

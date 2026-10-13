@@ -9,14 +9,22 @@ type RuntimeWithBuffer = typeof globalThis & {
 }
 
 export async function sign(expires: number = 10) {
-  const key = await loadKey()
-  const pub = getPublicKey(key)
+  const pub = await getServicePublicKey()
   const data = `${Math.round(new Date().getTime() / 1000) + expires}`
-  const signature = await makeSignature(key, data)
+  const signature = await signChallenge(data)
   return `key.${pub}.${signature}.${data}`
 }
 
+/** Sign arbitrary challenge data with existing service identity. */
+export async function signChallenge(challenge: string): Promise<string> {
+  return makeSignature(await loadKey(), challenge)
+}
+
 export async function publicKey(): Promise<string> {
+  return getServicePublicKey()
+}
+
+async function getServicePublicKey(): Promise<string> {
   const key = await loadKey()
   return getPublicKey(key)
 }
