@@ -4,7 +4,33 @@ import { NetworkPublisher, type NetworkShare, type NetworkPolicy } from './netwo
 type AnyIterator = AsyncIterator<any, void, any> | Promise<AsyncIterator<any, void, any>>
 
 export interface Context {
+  /** Provider selection: connection id or service key */
   service?: string
+  /** Provider selection: device id */
+  device?: string
+  [key: string]: unknown
+}
+
+/** Who made a request, as the hub tells the service (`context.hub.caller`). */
+export interface Caller {
+  /** Absent for anonymous callers */
+  key?: string
+  /** Absent unless the caller's connection is attached to a device */
+  device?: { id: string; name: string }
+  groups?: string[]
+  owner?: boolean
+  /** Set on requests through a merged hub: the merged hub's key */
+  via?: string
+  /** What the merged hub said about its caller. Unverified. */
+  claimed?: Caller
+}
+
+/** Second argument of post and stream handlers. */
+export interface ServiceRequest {
+  /** The caller, when the hub that forwarded the request is the pinned hub */
+  caller?: Caller
+  /** Request context without the hub's `hub` entry */
+  context: Context
 }
 
 export interface ServiceProvider {
@@ -129,15 +155,28 @@ export class MultiplatformService {
       console.error(this.refusedError)
     }
   }
-  post(path: string, action: (body: any) => any | Promise<any>, settings?: ApiSettings) {
+  post(path: string, action: (body: any, request: ServiceRequest) => any | Promise<any>, settings?: ApiSettings) {
     this.addSettings(path, settings)
-    this.channel.post(path, ({ body }) => action(body))
+    this.channel.post(path, ({ body, context }) => action(body, this.request(context)))
     return this
   }
-  stream(path: string, action: (body: any) => AnyIterator, settings?: ApiSettings) {
+  stream(path: string, action: (body: any, request: ServiceRequest) => AnyIterator, settings?: ApiSettings) {
     this.addSettings(path, settings)
-    this.channel.stream(path, ({ body }) => action(body))
+    this.channel.stream(path, ({ body, context }) => action(body, this.request(context)))
     return this
+  }
+  /**
+   * Reads the caller from `context.hub`. It is trusted only when it names the pinned hub key, because a hub
+   * that predates caller identity may pass a client's context through unchanged.
+   */
+  request(context: any): ServiceRequest {
+    if (!context || typeof context !== 'object') return { context: {} }
+    const { hub, ...rest } = context
+    const request: ServiceRequest = { context: rest }
+    if (hub && typeof hub === 'object' && this.hubKey && hub.hubKey === this.hubKey && hub.caller && typeof hub.caller === 'object') {
+      request.caller = hub.caller
+    }
+    return request
   }
   /** Key under which this service's hub key is pinned. */
   get hubAddress(): string {
