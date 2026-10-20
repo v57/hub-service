@@ -283,18 +283,17 @@ export class MultiplatformService {
 
   /** Key under which this service's hub key is pinned. */
   get hubAddress(): string {
-    return typeof this.address === 'number' ? `ws://localhost:${this.address}` : this.address
+    return normalizeHubAddress(this.address)
   }
 
   /** Connection headers, re-evaluated on every connect. */
   async headers(): Promise<Record<string, string>> {
     const hubKey = this.supportsV1 ? await this.pinnedHubKey() : undefined
-    if (!hubKey) {
-      this.connectedVersion = '0'
-      return { auth: await this.identity.sign(), v: '0' }
-    }
-    this.connectedVersion = '1'
-    const headers: Record<string, string> = { auth: await this.identity.sign(hubKey), v: '1' }
+    this.connectedVersion = hubKey ? '1' : '0'
+    const headers: Record<string, string> = hubKey
+      ? { auth: await this.identity.sign(hubKey), v: '1' }
+      : { auth: await this.identity.sign(), v: '0' }
+    // The hub accepts a certificate on v0 and v1 connects alike
     try {
       const device = await this.identity.certificate?.()
       if (device) headers.device = device
@@ -544,6 +543,18 @@ export interface ServiceOptions {
    * from the first connected reporter of each device. Needs a device certificate.
    */
   reporter?: boolean
+}
+
+/**
+ * The key a hub's pin is stored under: the dialed URL as channel builds it (a bare port is
+ * `ws://localhost:<port>`), with the scheme and host lowercased and no trailing slash.
+ */
+export function normalizeHubAddress(address: string | number): string {
+  if (typeof address === 'number' || /^\d+$/.test(address)) return `ws://localhost:${address}`
+  const match = address.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):\/\/([^/?#]*)(.*)$/)
+  if (!match) return address.replace(/\/+$/, '')
+  const [, scheme, authority, rest] = match
+  return `${scheme!.toLowerCase()}://${authority!.toLowerCase()}${rest!.replace(/\/+$/, '')}`
 }
 
 /** The parts of channel's WebSocketClient the service drives. */

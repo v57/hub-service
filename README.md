@@ -169,17 +169,19 @@ The signing token includes a short expiration window. Default expiration is 60 s
 
 Tokens are bound to one hub (protocol v1, `Docs/Devices/protocol.md` in the Hub workspace): on its first connection a
 service signs a v0 token, asks `hub/info` for the hub's key, pins it and reconnects with `v: 1`, signing
-`hub1:<hub key>:<expiry>`. Pins live in `hubs.json` beside the `auth` file (`localStorage` key `hubs` on the web).
+`hub1:<hub key>:<expiry>`. Pins live in `hubs.json` beside the `auth` file (`localStorage` key `hubs` on the web), keyed by the dialed
+URL (a bare port is `ws://localhost:<port>`; scheme and host lowercased, no trailing slash).
 Hubs without `hub/info` (Hub Lite) stay on v0. If the hub refuses a v1 connection, the service reports it in
 `refusedError` and stays disconnected rather than falling back; `forgetHubKey()` clears the pin and reconnects.
 
 ## Devices
 
 A Bun service runs on a device: it signs a 7-day certificate for its service key with the device key and sends it in
-the `device` header of v1 connections, renewing it at connect when less than a day is left. Every service of a
+the `device` header, renewing it at connect when less than a day is left. Every service of a
 device shares the key at `~/.hub/device.key` (`/var/lib/hub/device.key` for root on Linux; `HUB_DEVICE_KEY` overrides
 it), created by the first service that needs it. `HUB_DEVICE_NAME` and `HUB_DEVICE_PARENT` set the suggested name and
-declared parent; `HUB_DEVICE=0` or `device: false` turns device mode off. The Hub Launcher passes its device key and
+declared parent; `HUB_DEVICE=0` or `device: false` turns device mode off. Apps that keep the device key in their own
+store pass it as `device: { key }` (key file text, a `KeyFile`, or a loader). The Hub Launcher passes its device key and
 the app name (`HUB_INSTANCE`) to the apps it runs.
 
 The device's reporter (the Hub app on Apple devices, the launcher on servers) describes it:

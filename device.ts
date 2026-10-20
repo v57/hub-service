@@ -3,7 +3,15 @@ import { homedir, hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { KeyFile, certificateMaxLifetime, deviceId, makeCertificate, truncateUTF8 } from './keys'
 
+/** A device key: a key file's text, a loaded key, or a loader (for apps that keep it in their own store). */
+export type DeviceKeySource = KeyFile | string | (() => KeyFile | string | Promise<KeyFile | string>)
+
 export interface DeviceOptions {
+  /**
+   * A caller-provided device key, used instead of the key file. One OS instance should still use one device key;
+   * an app that can't share it becomes its own device.
+   */
+  key?: DeviceKeySource
   /** Device key file. Defaults to `HUB_DEVICE_KEY`, `/var/lib/hub/device.key` for root on Linux, else `~/.hub/device.key`. */
   keyPath?: string
   /** Suggested device name. Defaults to `HUB_DEVICE_NAME`, the computer name or the host name. */
@@ -110,6 +118,8 @@ export class DeviceCertificates {
   readonly parent?: string
   readonly lifetime: number
   private readonly service: () => Promise<string>
+  private readonly keySource?: DeviceKeySource
+  private providedKey?: Promise<KeyFile>
   private current?: { header: string; service: string; exp: number }
   constructor(options: DeviceOptions & { instance: string; service: () => Promise<string> }) {
     this.keyPath = options.keyPath ?? deviceKeyPath()
@@ -120,9 +130,21 @@ export class DeviceCertificates {
     if (parent) this.parent = truncateUTF8(parent, 64)
     this.lifetime = Math.max(60, Math.min(options.lifetime ?? certificateMaxLifetime, certificateMaxLifetime))
     this.service = options.service
+    this.keySource = options.key
   }
   key(): Promise<KeyFile> {
-    return loadDeviceKey(this.keyPath)
+    const source = this.keySource
+    if (source === undefined) return loadDeviceKey(this.keyPath)
+    if (!this.providedKey) {
+      this.providedKey = (async () => {
+        const key = typeof source === 'function' ? await source() : source
+        return typeof key === 'string' ? new KeyFile(key) : key
+      })().catch(error => {
+        this.providedKey = undefined
+        throw error
+      })
+    }
+    return this.providedKey
   }
   /** The device id: the first 32 hex characters of SHA-256 of the device key. */
   async id(): Promise<string> {

@@ -9,6 +9,7 @@ import { MultiplatformService } from './service'
 import { FakeHub, vectors, waitFor } from './testing/fake-hub'
 
 const serviceKey = new KeyFile(vectors.keys.service.keyFile)
+const device = () => new KeyFile(vectors.keys.device.keyFile)
 let directory: string
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'hub-service-device-test-'))
@@ -107,6 +108,27 @@ describe('service certificates', () => {
     expect(fields.deviceName).toBe('n'.repeat(64))
   })
 
+  test('can use a caller-provided key', async () => {
+    let loads = 0
+    const certificates = new DeviceCertificates({
+      key: async () => {
+        loads += 1
+        return vectors.keys.device.keyFile
+      },
+      keyPath: join(directory, 'unused.key'),
+      instance: 's3-local/Backup Disk',
+      name: 'Mac Studio',
+      platform: 'macos',
+      service: async () => serviceKey.publicKey,
+    })
+    expect(await certificates.header(1792500000)).toBe(vectors.certificate.header)
+    expect(await certificates.header(1792500000 + 604800)).not.toBe(vectors.certificate.header)
+    expect(loads).toBe(1)
+    expect(await Bun.file(join(directory, 'unused.key')).exists()).toBeFalse()
+    const fixed = new DeviceCertificates({ key: device(), instance: 'x', service: async () => serviceKey.publicKey })
+    expect(await fixed.id()).toBe(vectors.keys.device.deviceId)
+  })
+
   test('carry a declared parent', async () => {
     const certificates = await issuer({ instance: 'builder', name: 'builder', platform: 'linux', parent: 'Mac Studio' })
     expect(await certificates.header(1792500000)).toBe(vectors.childCertificate.header)
@@ -140,8 +162,9 @@ describe('device header', () => {
     )
     service.start()
     await waitFor(() => hub!.open.some(c => c.version === '1' && c.updates.length > 0))
-    // No certificate on the v0 connection that learns the hub key
-    expect(hub.connections[0]!.device).toBeUndefined()
+    // The v0 connection that learns the hub key carries the certificate too
+    expect(hub.connections[0]!.version).toBe('0')
+    expect(hub.certificate(hub.connections[0]!)!.service).toBe(serviceKey.publicKey)
     const connection = hub.open[0]!
     const fields = hub.certificate(connection)!
     expect(fields.service).toBe(connection.key!)

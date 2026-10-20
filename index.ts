@@ -5,8 +5,8 @@ export type { Context, Caller, ServiceRequest, ServiceProvider, ServiceIdentity,
 export type * from './device-api'
 export * from './network'
 export { publicKey, signChallenge, HubKeyFile } from './keychain'
-export { DeviceCertificates, deviceKeyPath, loadDeviceKey, type DeviceOptions } from './device'
-export { deviceId, safetyCode } from './keys'
+export { DeviceCertificates, deviceKeyPath, loadDeviceKey, type DeviceOptions, type DeviceKeySource } from './device'
+export { KeyFile, deviceId, safetyCode } from './keys'
 import { hubKeys, publicKey, sign, signChallenge } from './keychain'
 
 export interface BunServiceOptions extends ServiceOptions {
@@ -28,6 +28,7 @@ export class Service extends NetworkService {
         ? undefined
         : new DeviceCertificates({
             ...options?.device,
+            // Configured (option or HUB_INSTANCE), else the profile name, else the directory; empty becomes 'service'
             instance: options?.instance ?? process.env.HUB_INSTANCE ?? options?.name ?? basename(process.cwd()),
             service: () => publicKey(),
           })

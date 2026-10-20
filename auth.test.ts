@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { KeyFile, authToken } from './keys'
 import { HubKeyFile } from './keychain'
-import { MultiplatformService, type HubKeyStore, type ServiceIdentity } from './service'
+import { MultiplatformService, normalizeHubAddress, type HubKeyStore, type ServiceIdentity } from './service'
 import { FakeHub, vectors, waitFor, type FakeHubOptions } from './testing/fake-hub'
 
 const serviceKey = new KeyFile(vectors.keys.service.keyFile)
@@ -137,5 +137,14 @@ describe('hub key file', () => {
     expect(await new HubKeyFile(path).get('ws://localhost:1997')).toBe(hubKey)
     await store.set('ws://localhost:1997', undefined)
     expect(await Bun.file(path).json()).toEqual({})
+  })
+})
+
+describe('hub addresses', () => {
+  test('are normalized like the dialed URL', () => {
+    expect(normalizeHubAddress(1997)).toBe('ws://localhost:1997')
+    expect(normalizeHubAddress('1997')).toBe('ws://localhost:1997')
+    expect(normalizeHubAddress('WSS://Hub.Example.COM/')).toBe('wss://hub.example.com')
+    expect(normalizeHubAddress('ws://Host:80/Path/')).toBe('ws://host:80/Path')
   })
 })
