@@ -171,8 +171,10 @@ Tokens are bound to one hub (protocol v1, `Docs/Devices/protocol.md` in the Hub 
 service signs a v0 token, asks `hub/info` for the hub's key, pins it and reconnects with `v: 1`, signing
 `hub1:<hub key>:<expiry>`. Pins live in `hubs.json` beside the `auth` file (`localStorage` key `hubs` on the web), keyed by the dialed
 URL (a bare port is `ws://localhost:<port>`; scheme and host lowercased, no trailing slash).
-Hubs without `hub/info` (Hub Lite) stay on v0. If the hub refuses a v1 connection, the service reports it in
-`refusedError` and stays disconnected rather than falling back; `forgetHubKey()` clears the pin and reconnects.
+Hubs without `hub/info` (Hub Lite) stay on v0. If the hub refuses the connection (a changed hub key, a revoked
+service key), the service never falls back to v0: it sets `refusedError` (a `HubRefusedError` naming the pinned
+key), logs it, calls the `onError` option, and fails waiting and new `send` calls with it instead of hanging.
+`forgetHubKey()` clears the pin and reconnects.
 
 ## Devices
 

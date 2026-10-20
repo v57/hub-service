@@ -78,8 +78,15 @@ export class MultiplatformService {
   hubKey?: string
   /** Protocol version of the current or last connection. */
   connectedVersion?: '0' | '1'
-  /** Set when the hub refused a v1 connect. The service stays disconnected until `forgetHubKey()`. */
-  refusedError?: string
+  /**
+   * Set when the hub refused the connection. The channel client stops reconnecting then, so the service stays
+   * disconnected until `forgetHubKey()`; sends fail with this error instead of waiting.
+   */
+  refusedError?: HubRefusedError
+  /** Called when the hub refuses the connection. */
+  onError?: (error: HubRefusedError) => void
+  /** Rejects sends that are waiting when a refusal comes in */
+  private waitingSends = new Set<(error: HubRefusedError) => void>()
   /** Asks for the reporter role of this service's device. */
   readonly reporter: boolean
   /** The last description passed to `describeDevice`, sent again on every connect. */
@@ -96,6 +103,7 @@ export class MultiplatformService {
     this.identity = typeof sign === 'function' ? { sign: () => sign() } : sign
     this.initialHubKey = options?.hubKey
     this.reporter = options?.reporter ?? false
+    this.onError = options?.onError
     this.address = options?.address ?? globalThis.Bun?.env?.HUB ?? 1997
     if (options?.name || options?.icon) {
       this.profile = {}
@@ -165,9 +173,21 @@ export class MultiplatformService {
       const wasOpen = this.isOpen
       this.isOpen = false
       onclose?.()
-      if (wasOpen || ws.isRunning || this.connectedVersion !== '1') return
-      this.refusedError = `hub at ${this.hubAddress} refused the connection signed for its pinned key ${this.hubKey}; the hub key changed or a different server answers. Call forgetHubKey() to trust the new hub.`
-      console.error(this.refusedError)
+      // Channel sets isRunning to false when the upgrade is answered without a WebSocket
+      if (wasOpen || ws.isRunning) return
+      this.refused(new HubRefusedError(this.hubAddress, this.connectedVersion === '1' ? this.hubKey : undefined))
+    }
+  }
+  private refused(error: HubRefusedError) {
+    this.refusedError = error
+    console.error(error.message)
+    const waiting = [...this.waitingSends]
+    this.waitingSends.clear()
+    waiting.forEach(reject => reject(error))
+    try {
+      this.onError?.(error)
+    } catch (handlerError) {
+      console.error('onError failed:', handlerError)
     }
   }
   post(path: string, action: (body: any, request: ServiceRequest) => any | Promise<any>, settings?: ApiSettings) {
@@ -362,12 +382,19 @@ export class MultiplatformService {
     this.sender?.ws?.ws?.close()
   }
 
-  send(path: string, body?: any, options?: SendOptions) {
+  /** Fails with `refusedError` when the hub refused the connection, instead of waiting for a reconnect that never comes. */
+  send(path: string, body?: any, options?: SendOptions): Promise<any> {
     if (!this.sender) throw 'Service not started'
-    return this.sender.send(path, body, options)
+    if (this.refusedError) return Promise.reject(this.refusedError)
+    const response = this.sender.send(path, body, options)
+    let reject!: (error: HubRefusedError) => void
+    const refused = new Promise<never>((_, r) => (reject = r))
+    this.waitingSends.add(reject)
+    return Promise.race([response, refused]).finally(() => this.waitingSends.delete(reject))
   }
   values(path: string, body?: any, options?: SendOptions) {
     if (!this.sender) throw 'Service not started'
+    if (this.refusedError) throw this.refusedError
     return this.sender.values(path, body, options)
   }
   private addSettings(path: string, settings: ApiSettings | undefined) {
@@ -543,6 +570,8 @@ export interface ServiceOptions {
    * from the first connected reporter of each device. Needs a device certificate.
    */
   reporter?: boolean
+  /** Called when the hub refuses the connection (see `refusedError`). */
+  onError?: (error: HubRefusedError) => void
 }
 
 /**
@@ -555,6 +584,22 @@ export function normalizeHubAddress(address: string | number): string {
   if (!match) return address.replace(/\/+$/, '')
   const [, scheme, authority, rest] = match
   return `${scheme!.toLowerCase()}://${authority!.toLowerCase()}${rest!.replace(/\/+$/, '')}`
+}
+
+/** The hub refused the connection: with a pinned key, the hub key changed or another server answers. */
+export class HubRefusedError extends Error {
+  constructor(
+    readonly address: string,
+    /** The pinned key the refused token was bound to; absent for a refused v0 connection */
+    readonly hubKey?: string,
+  ) {
+    super(
+      hubKey
+        ? `hub at ${address} refused the connection signed for its pinned key ${hubKey}; the hub key changed, the service key was revoked, or a different server answers. Call forgetHubKey() if the hub's key changed on purpose.`
+        : `hub at ${address} refused the connection (unknown or revoked key, or not a hub)`,
+    )
+    this.name = 'HubRefusedError'
+  }
 }
 
 /** The parts of channel's WebSocketClient the service drives. */

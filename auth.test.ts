@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { KeyFile, authToken } from './keys'
 import { HubKeyFile } from './keychain'
-import { MultiplatformService, normalizeHubAddress, type HubKeyStore, type ServiceIdentity } from './service'
+import { HubRefusedError, MultiplatformService, normalizeHubAddress, type HubKeyStore, type ServiceIdentity } from './service'
 import { FakeHub, vectors, waitFor, type FakeHubOptions } from './testing/fake-hub'
 
 const serviceKey = new KeyFile(vectors.keys.service.keyFile)
@@ -72,6 +72,17 @@ describe('hub key pinning', () => {
     expect(hub.infoCalls).toBe(0)
   })
 
+  test('reports a refused v0 connection too', async () => {
+    const { hub, port } = startHub({ refuse: () => 'key revoked' })
+    const errors: HubRefusedError[] = []
+    const service = new MultiplatformService(identity(), { address: port, onError: error => errors.push(error) })
+    startService(service)
+    await waitFor(() => errors.length === 1)
+    expect(errors[0]!.hubKey).toBeUndefined()
+    expect(service.connectedVersion).toBe('0')
+    expect(hub.connections).toEqual([])
+  })
+
   test('uses a hub key supplied up front', async () => {
     const { hub, port } = startHub()
     startService(new MultiplatformService(identity(), { address: port, hubKey }))
@@ -102,16 +113,30 @@ describe('hub key pinning', () => {
     const pins = new Pins()
     // Another server's key: the hub refuses the token
     pins.keys[`ws://localhost:${port}`] = vectors.keys.device.publicKey
-    const service = startService(new MultiplatformService(identity(pins), { address: port }))
-    await new Promise(r => setTimeout(r, 300))
+    const errors: HubRefusedError[] = []
+    const service = new MultiplatformService(identity(pins), { address: port, onError: error => errors.push(error) })
+    startService(service)
+    // Sent before the refusal: fails instead of waiting forever
+    const waiting = service.send('hub/info')
+    await expect(waiting).rejects.toBeInstanceOf(HubRefusedError)
     expect(hub.connections).toEqual([])
     expect(service.connectedVersion).toBe('1')
-    expect(service.refusedError).toContain('refused')
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toBe(service.refusedError!)
+    expect(errors[0]!.hubKey).toBe(vectors.keys.device.publicKey)
+    expect(errors[0]!.message).toContain(vectors.keys.device.publicKey)
+    // Sent after the refusal: fails at once
+    await expect(service.send('hub/info')).rejects.toBe(service.refusedError!)
+    expect(() => service.values('hub/info')).toThrow(HubRefusedError)
+    await new Promise(r => setTimeout(r, 300))
+    expect(hub.connections).toEqual([])
 
     await service.forgetHubKey()
     expect(pins.keys).toEqual({})
     await waitFor(() => hub.open.some(c => c.version === '1' && c.updates.length > 0))
     expect(pins.keys[`ws://localhost:${port}`]).toBe(hubKey)
+    expect(service.refusedError).toBeUndefined()
+    expect(await service.send('hub/info')).toMatchObject({ key: hubKey })
   })
 
   test('answers requests on the v1 connection', async () => {

@@ -1,5 +1,6 @@
 import { MultiplatformService, type ServiceOptions } from './service'
 export type { Context, Caller, ServiceRequest, ServiceProvider, ServiceIdentity, HubKeyStore, HubInfo } from './service'
+export { HubRefusedError, normalizeHubAddress } from './service'
 export type * from './device-api'
 export { publicKey, signChallenge } from './keychain-web'
 import { hubKeys, sign } from './keychain-web'
