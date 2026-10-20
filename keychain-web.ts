@@ -1,3 +1,5 @@
+import type { HubKeyStore } from './service'
+
 const textEncoder = new TextEncoder()
 let privateKey: string | undefined
 let memoryKey: string | undefined
@@ -8,11 +10,15 @@ type RuntimeWithBuffer = typeof globalThis & {
   }
 }
 
-export async function sign(expires: number = 10) {
+/**
+ * Auth token for the hub connection, valid for `expires` seconds.
+ * With `hubKey` the token is bound to that hub (v1), otherwise it is a v0 token.
+ */
+export async function sign(expires: number = 60, hubKey?: string) {
   const pub = await getServicePublicKey()
-  const data = `${Math.round(new Date().getTime() / 1000) + expires}`
-  const signature = await signChallenge(data)
-  return `key.${pub}.${signature}.${data}`
+  const expiry = `${Math.round(new Date().getTime() / 1000) + expires}`
+  const signature = await signChallenge(hubKey ? `hub1:${hubKey}:${expiry}` : expiry)
+  return `key.${pub}.${signature}.${expiry}`
 }
 
 /** Sign arbitrary challenge data with existing service identity. */
@@ -121,3 +127,31 @@ async function writeStoredKey(key: string): Promise<void> {
   }
   memoryKey = key
 }
+
+/** Pinned hub keys in localStorage (`hubs`), or in memory where it is unavailable. */
+export class HubKeyStorage implements HubKeyStore {
+  private memory: Record<string, string> = {}
+  get(address: string): string | undefined {
+    return this.load()[address]
+  }
+  set(address: string, hubKey: string | undefined): void {
+    const keys = { ...this.load() }
+    if (hubKey) keys[address] = hubKey
+    else delete keys[address]
+    this.memory = keys
+    if (typeof localStorage === 'undefined') return
+    try {
+      localStorage.setItem('hubs', JSON.stringify(keys))
+    } catch {}
+  }
+  private load(): Record<string, string> {
+    if (typeof localStorage === 'undefined') return this.memory
+    try {
+      const value = JSON.parse(localStorage.getItem('hubs') ?? 'null')
+      if (value && typeof value === 'object' && !Array.isArray(value)) return value
+    } catch {}
+    return this.memory
+  }
+}
+
+export const hubKeys = new HubKeyStorage()

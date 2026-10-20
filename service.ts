@@ -1,7 +1,6 @@
 import type { SendOptions } from 'channel/channel'
 import { Channel, type Sender } from 'channel/client'
 import { NetworkPublisher, type NetworkShare, type NetworkPolicy } from './network'
-const v = '0'
 type AnyIterator = AsyncIterator<any, void, any> | Promise<AsyncIterator<any, void, any>>
 
 export interface Context {
@@ -13,17 +12,55 @@ export interface ServiceProvider {
   name?: string
 }
 
+/** Pinned hub keys by hub address. */
+export interface HubKeyStore {
+  get(address: string): Promise<string | undefined> | string | undefined
+  set(address: string, hubKey: string | undefined): Promise<void> | void
+}
+
+/** What a service signs its connection with. */
+export interface ServiceIdentity {
+  /** `auth` header value; bound to `hubKey` (v1) when one is given. */
+  sign(hubKey?: string): Promise<string>
+  /** Where learned hub keys are pinned. Without it they are pinned in memory only. */
+  hubKeys?: HubKeyStore
+  /** `device` header value (service certificate) for a v1 connection, if this service runs in device mode. */
+  certificate?(): Promise<string | undefined>
+}
+
+/** Result of `hub/info` (hub-pro only). */
+export interface HubInfo {
+  key: string
+  protocol: number
+  pro?: boolean
+  mode?: 'default-allow' | 'default-deny'
+}
+
 export class MultiplatformService {
   address: string | number
   channel = new Channel()
-  sender?: Sender
+  sender?: (Sender & { ws?: ClientSocket }) | undefined
   apps: AppHeader[] = []
   group?: string
   settings: Record<string, ApiSettings> = {}
   profile?: Profile
-  sign: () => Promise<string>
-  constructor(sign: () => Promise<string>, options?: ServiceOptions) {
-    this.sign = sign
+  identity: ServiceIdentity
+  /** Signs v1 tokens. False for a plain sign function, which only makes v0 tokens. */
+  readonly supportsV1: boolean
+  /** The pinned key of the hub at `address`, once known. */
+  hubKey?: string
+  /** Protocol version of the current or last connection. */
+  connectedVersion?: '0' | '1'
+  /** Set when the hub refused a v1 connect. The service stays disconnected until `forgetHubKey()`. */
+  refusedError?: string
+  private isOpen = false
+  private hubKeyLoaded = false
+  private readonly initialHubKey?: string
+  private readonly memoryHubKeys = new MemoryHubKeys()
+  constructor(sign: (() => Promise<string>) | ServiceIdentity, options?: ServiceOptions) {
+    this.supportsV1 = typeof sign !== 'function'
+    this.identity = typeof sign === 'function' ? { sign: () => sign() } : sign
+    this.initialHubKey = options?.hubKey
     this.address = options?.address ?? globalThis.Bun?.env?.HUB ?? 1997
     if (options?.name || options?.icon) {
       this.profile = {}
@@ -52,9 +89,17 @@ export class MultiplatformService {
     const apps = this.apps
     const getProfile = () => this.profile
     const onConnected = (sender: Sender) => this.onConnected(sender)
+    const learnHubKey = (sender: Sender) => this.learnHubKey(sender)
+    const opened = () => {
+      this.isOpen = true
+      this.refusedError = undefined
+    }
     this.sender = this.channel.connect(this.address, {
-      headers: async () => ({ auth: await this.sign(), v }),
+      headers: () => this.headers(),
       async onConnect(sender) {
+        opened()
+        // A newly learned hub key takes effect on the next connect
+        if (await learnHubKey(sender)) return
         try {
           const profile = getProfile()
           if (profile) await sender.send('hub/profile/update', profile)
@@ -64,7 +109,25 @@ export class MultiplatformService {
         await onConnected(sender)
       },
     })
+    this.watchRefusal()
     return this
+  }
+  /**
+   * The channel client stops for good when the hub refuses the upgrade.
+   * A refused v1 connect means the hub key changed or another server answers; it is reported, never retried as v0.
+   */
+  private watchRefusal() {
+    const ws = this.sender?.ws
+    if (!ws) return
+    const onclose = ws.onclose
+    ws.onclose = () => {
+      const wasOpen = this.isOpen
+      this.isOpen = false
+      onclose?.()
+      if (wasOpen || ws.isRunning || this.connectedVersion !== '1') return
+      this.refusedError = `hub at ${this.hubAddress} refused the connection signed for its pinned key ${this.hubKey}; the hub key changed or a different server answers. Call forgetHubKey() to trust the new hub.`
+      console.error(this.refusedError)
+    }
   }
   post(path: string, action: (body: any) => any | Promise<any>, settings?: ApiSettings) {
     this.addSettings(path, settings)
@@ -76,6 +139,88 @@ export class MultiplatformService {
     this.channel.stream(path, ({ body }) => action(body))
     return this
   }
+  /** Key under which this service's hub key is pinned. */
+  get hubAddress(): string {
+    return typeof this.address === 'number' ? `ws://localhost:${this.address}` : this.address
+  }
+
+  /** Connection headers, re-evaluated on every connect. */
+  async headers(): Promise<Record<string, string>> {
+    const hubKey = this.supportsV1 ? await this.pinnedHubKey() : undefined
+    if (!hubKey) {
+      this.connectedVersion = '0'
+      return { auth: await this.identity.sign(), v: '0' }
+    }
+    this.connectedVersion = '1'
+    const headers: Record<string, string> = { auth: await this.identity.sign(hubKey), v: '1' }
+    try {
+      const device = await this.identity.certificate?.()
+      if (device) headers.device = device
+    } catch (error) {
+      console.error('Failed to make the device certificate:', error)
+    }
+    return headers
+  }
+
+  /** Clears the pinned hub key, for when the hub's key changed on purpose. The next connect uses v0 and learns it again. */
+  async forgetHubKey(): Promise<void> {
+    this.hubKey = undefined
+    this.hubKeyLoaded = true
+    await this.hubKeyStore.set(this.hubAddress, undefined)
+    const ws = this.sender?.ws
+    if (this.refusedError && ws && !ws.isRunning) {
+      this.refusedError = undefined
+      ws.isRunning = true
+      ws.start()
+    }
+  }
+
+  private get hubKeyStore(): HubKeyStore {
+    return this.identity.hubKeys ?? this.memoryHubKeys
+  }
+
+  private async pinnedHubKey(): Promise<string | undefined> {
+    if (!this.hubKeyLoaded) {
+      try {
+        this.hubKey = (await this.hubKeyStore.get(this.hubAddress)) ?? this.initialHubKey
+      } catch (error) {
+        console.error('Failed to read pinned hub keys:', error)
+        this.hubKey = this.initialHubKey
+      }
+      this.hubKeyLoaded = true
+    }
+    return this.hubKey
+  }
+
+  /**
+   * On a v0 connection, asks the hub for its key and pins it.
+   * Returns true when it reconnects to switch to v1. Hubs without `hub/info` (hub-lite) stay on v0.
+   */
+  private async learnHubKey(sender: Sender): Promise<boolean> {
+    if (!this.supportsV1 || this.connectedVersion !== '0') return false
+    let info: HubInfo
+    try {
+      info = await sender.send('hub/info')
+    } catch {
+      return false
+    }
+    if (typeof info?.key !== 'string' || !info.key) return false
+    this.hubKey = info.key
+    this.hubKeyLoaded = true
+    try {
+      await this.hubKeyStore.set(this.hubAddress, info.key)
+    } catch (error) {
+      console.error('Failed to pin the hub key:', error)
+    }
+    this.reconnect()
+    return true
+  }
+
+  /** Drops the current connection; the channel client reconnects with fresh headers. */
+  protected reconnect() {
+    this.sender?.ws?.ws?.close()
+  }
+
   send(path: string, body?: any, options?: SendOptions) {
     if (!this.sender) throw 'Service not started'
     return this.sender.send(path, body, options)
@@ -103,7 +248,7 @@ export class NetworkService extends MultiplatformService {
   private readonly publicKey: () => Promise<string>
 
   constructor(
-    sign: () => Promise<string>,
+    sign: (() => Promise<string>) | ServiceIdentity,
     signChallenge: (challenge: string) => Promise<string>,
     publicKey: () => Promise<string>,
     options?: ServiceOptions,
@@ -250,6 +395,27 @@ export interface ServiceOptions {
   address?: string | number
   name?: string
   icon?: Icon
+  /** The hub's key, if known up front (from an invitation or config). Otherwise learned through `hub/info`. */
+  hubKey?: string
+}
+
+/** The parts of channel's WebSocketClient the service drives. */
+interface ClientSocket {
+  ws?: { close(): void }
+  isRunning: boolean
+  onclose?: () => void
+  start(): void
+}
+
+class MemoryHubKeys implements HubKeyStore {
+  private keys = new Map<string, string>()
+  get(address: string) {
+    return this.keys.get(address)
+  }
+  set(address: string, hubKey: string | undefined) {
+    if (hubKey) this.keys.set(address, hubKey)
+    else this.keys.delete(address)
+  }
 }
 export interface AppHeader {
   type: 'app'
