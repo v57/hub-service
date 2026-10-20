@@ -1,6 +1,7 @@
 import type { SendOptions } from 'channel/channel'
 import { Channel, type Sender } from 'channel/client'
 import { NetworkPublisher, type NetworkShare, type NetworkPolicy } from './network'
+import type { DeviceData, DeviceDescription } from './device-api'
 type AnyIterator = AsyncIterator<any, void, any> | Promise<AsyncIterator<any, void, any>>
 
 export interface Context {
@@ -79,6 +80,13 @@ export class MultiplatformService {
   connectedVersion?: '0' | '1'
   /** Set when the hub refused a v1 connect. The service stays disconnected until `forgetHubKey()`. */
   refusedError?: string
+  /** Asks for the reporter role of this service's device. */
+  readonly reporter: boolean
+  /** The last description passed to `describeDevice`, sent again on every connect. */
+  deviceDescription?: DeviceDescription
+  /** True once the hub accepted this connection's description; false when another service reports for the device. */
+  isDeviceReporter?: boolean
+  private describeRetry?: ReturnType<typeof setInterval>
   private isOpen = false
   private hubKeyLoaded = false
   private readonly initialHubKey?: string
@@ -87,6 +95,7 @@ export class MultiplatformService {
     this.supportsV1 = typeof sign !== 'function'
     this.identity = typeof sign === 'function' ? { sign: () => sign() } : sign
     this.initialHubKey = options?.hubKey
+    this.reporter = options?.reporter ?? false
     this.address = options?.address ?? globalThis.Bun?.env?.HUB ?? 1997
     if (options?.name || options?.icon) {
       this.profile = {}
@@ -119,7 +128,10 @@ export class MultiplatformService {
     const opened = () => {
       this.isOpen = true
       this.refusedError = undefined
+      this.isDeviceReporter = undefined
     }
+    const reporter = this.reporter
+    const registered = () => this.sendDescription()
     this.sender = this.channel.connect(this.address, {
       headers: () => this.headers(),
       async onConnect(sender) {
@@ -130,7 +142,8 @@ export class MultiplatformService {
           const profile = getProfile()
           if (profile) await sender.send('hub/profile/update', profile)
         } catch {}
-        await sender.send('hub/service/update', { services, apps })
+        await sender.send('hub/service/update', reporter ? { services, apps, reporter } : { services, apps })
+        await registered()
 
         await onConnected(sender)
       },
@@ -178,6 +191,94 @@ export class MultiplatformService {
     }
     return request
   }
+  /**
+   * Reports this device's capabilities as its reporter (`reporter: true`). The description is kept and sent again
+   * after every reconnect. Returns false while another service is the device's reporter or the hub is unreachable;
+   * it is retried every minute, so a service that takes over the role describes the device.
+   */
+  async describeDevice(description: DeviceDescription): Promise<boolean> {
+    this.deviceDescription = description
+    return this.sendDescription()
+  }
+
+  /**
+   * Sends live data (`hub/device/data`) as the device's reporter. Returns false when this service is not the
+   * reporter or the hub is unreachable. Data is not kept: send it again on the next tick.
+   */
+  async sendDeviceData(data: DeviceData): Promise<boolean> {
+    if (!this.reporter || !this.isOpen) return false
+    // Re-describe after taking over the role from another reporter
+    if (this.deviceDescription && !this.isDeviceReporter && !(await this.sendDescription())) return false
+    try {
+      await this.send('hub/device/data', data)
+      this.isDeviceReporter = true
+      return true
+    } catch (error) {
+      if (error === 'not the device reporter') this.isDeviceReporter = false
+      return false
+    }
+  }
+
+  /** Calls `collect` every `interval` milliseconds and sends the result as live data. Returns a stop function. */
+  reportDeviceData(interval: number, collect: () => DeviceData | Promise<DeviceData>): () => void {
+    let running = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const tick = async () => {
+      try {
+        await this.sendDeviceData(await collect())
+      } catch (error) {
+        console.error('Failed to collect device data:', error)
+      }
+      if (running) timer = setTimeout(tick, interval)
+    }
+    timer = setTimeout(tick, 0)
+    return () => {
+      running = false
+      if (timer) clearTimeout(timer)
+    }
+  }
+
+  /** Devices with their services, presence and capabilities (`hub/devices`, owners and grants). Yields `Device[]`. */
+  devices() {
+    return this.values('hub/devices')
+  }
+  /** Devices waiting for approval (`hub/devices/pending`, owners). Yields `PendingDevice[]`. */
+  pendingDevices() {
+    return this.values('hub/devices/pending')
+  }
+  /** Latest live data of a device, then updates (`hub/devices/data`). Yields `DeviceData`. */
+  deviceData(id: string) {
+    return this.values('hub/devices/data', { id })
+  }
+
+  private async sendDescription(): Promise<boolean> {
+    const description = this.deviceDescription
+    if (!this.reporter || !description || !this.isOpen || !this.sender) return false
+    try {
+      await this.sender.send('hub/device/describe', description)
+      this.isDeviceReporter = true
+      this.stopDescribeRetry()
+      return true
+    } catch (error) {
+      if (error === 'not the device reporter') this.isDeviceReporter = false
+      this.startDescribeRetry()
+      return false
+    }
+  }
+  private startDescribeRetry() {
+    if (this.describeRetry) return
+    this.describeRetry = setInterval(() => {
+      if (!this.isOpen) return
+      void this.sendDescription()
+    }, 60_000)
+    ;(this.describeRetry as any).unref?.()
+  }
+  private stopDescribeRetry() {
+    if (!this.describeRetry) return
+    clearInterval(this.describeRetry)
+    this.describeRetry = undefined
+  }
+
   /** Key under which this service's hub key is pinned. */
   get hubAddress(): string {
     return typeof this.address === 'number' ? `ws://localhost:${this.address}` : this.address
@@ -436,6 +537,11 @@ export interface ServiceOptions {
   icon?: Icon
   /** The hub's key, if known up front (from an invitation or config). Otherwise learned through `hub/info`. */
   hubKey?: string
+  /**
+   * Ask for the reporter role of this service's device: the hub takes `describeDevice` and `sendDeviceData`
+   * from the first connected reporter of each device. Needs a device certificate.
+   */
+  reporter?: boolean
 }
 
 /** The parts of channel's WebSocketClient the service drives. */

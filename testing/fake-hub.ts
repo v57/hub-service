@@ -87,7 +87,10 @@ export class FakeHub {
       },
       onDisconnect(connection) {
         connection.state.closed = true
-        if (hub.reporter === connection.state) hub.reporter = undefined
+        if (hub.reporter === connection.state) {
+          // The next connected reporter of the device takes over
+          hub.reporter = hub.open.find(c => c.device && c.updates.some(update => update?.reporter))
+        }
       },
     })
   }
