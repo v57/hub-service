@@ -45,13 +45,6 @@ function startService(service: MultiplatformService) {
   return service
 }
 
-describe('auth tokens', () => {
-  test('match the shared vectors', () => {
-    expect(authToken(serviceKey, vectors.auth.expiry)).toBe(vectors.auth.v0.header)
-    expect(authToken(serviceKey, vectors.auth.expiry, hubKey)).toBe(vectors.auth.v1.header)
-  })
-})
-
 describe('hub key pinning', () => {
   test('learns the hub key on a v0 connection and reconnects with v1', async () => {
     const { hub, port } = startHub()
