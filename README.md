@@ -65,6 +65,12 @@ Options:
 - `address?: string | number`
 - `name?: string`
 - `icon?: Icon`
+- `hubKey?: string` - the hub's key when known up front; otherwise learned on the first connection (see Auth)
+- `reporter?: boolean` - ask for the reporter role of this service's device (see Devices)
+- `instance?: string` (Bun) - instance name, unique on the device; defaults to `HUB_INSTANCE`, then `name`, then the
+  working directory's name
+- `device?: DeviceOptions | false` (Bun) - device key path, name, platform, parent and certificate lifetime, or
+  `false` to connect without a device
 
 `name` and `icon` are sent as the service profile when a client connects.
 
@@ -75,6 +81,19 @@ Register a request handler.
 ```ts
 service.post('math/add', body => body.a + body.b)
 ```
+
+Handlers get a second argument `{ caller, context }`. `caller` is who made the request, as the hub reports it:
+`{ key?, device?: { id, name }, groups?, owner? }`. It is set only when the hub that forwarded the request is the
+pinned hub, so a hub that passes client context through can't be used to forge it.
+
+```ts
+service.post('git/push', (body, { caller }) => {
+  if (!caller?.owner) throw 'permissions required'
+  // ...
+})
+```
+
+Settings may mark a path `public: true`: callable by anyone on hubs in `default-deny` mode.
 
 ### `stream(path, handler, settings?)`
 
@@ -146,7 +165,34 @@ selected port through `getSharePublication(name)`.
 - The file is ignored by git in this repo.
 - The web runtime stores the key in `localStorage` under `auth` when possible, otherwise in memory.
 
-The signing token includes a short expiration window. Default expiration is 10 seconds.
+The signing token includes a short expiration window. Default expiration is 60 seconds.
+
+Tokens are bound to one hub (protocol v1, `Docs/Devices/protocol.md` in the Hub workspace): on its first connection a
+service signs a v0 token, asks `hub/info` for the hub's key, pins it and reconnects with `v: 1`, signing
+`hub1:<hub key>:<expiry>`. Pins live in `hubs.json` beside the `auth` file (`localStorage` key `hubs` on the web).
+Hubs without `hub/info` (Hub Lite) stay on v0. If the hub refuses a v1 connection, the service reports it in
+`refusedError` and stays disconnected rather than falling back; `forgetHubKey()` clears the pin and reconnects.
+
+## Devices
+
+A Bun service runs on a device: it signs a 7-day certificate for its service key with the device key and sends it in
+the `device` header of v1 connections, renewing it at connect when less than a day is left. Every service of a
+device shares the key at `~/.hub/device.key` (`/var/lib/hub/device.key` for root on Linux; `HUB_DEVICE_KEY` overrides
+it), created by the first service that needs it. `HUB_DEVICE_NAME` and `HUB_DEVICE_PARENT` set the suggested name and
+declared parent; `HUB_DEVICE=0` or `device: false` turns device mode off. The Hub Launcher passes its device key and
+the app name (`HUB_INSTANCE`) to the apps it runs.
+
+The device's reporter (the Hub app on Apple devices, the launcher on servers) describes it:
+
+```ts
+const service = new Service({ reporter: true }).start()
+await service.describeDevice({ name: 'Mac Studio', capabilities: { memory: 68719476736 } })
+const stop = service.reportDeviceData(5000, () => ({ cpu: 0.25 }))
+```
+
+The hub takes descriptions and data from the first connected reporter of each device; the others get `false` until
+they take over. Owners and granted callers read `devices()`, `pendingDevices()` and `deviceData(id)`, and can ask for
+a provider on a given device with `send(path, body, { context: { device: id } })`.
 
 ## Apps
 
