@@ -24,6 +24,7 @@ async function connect(options: { info?: boolean } = {}) {
       return request.caller?.key ?? null
     })
     .post('test/legacy', body => body)
+    .post('test/public', () => true, { public: true })
     .stream('test/stream', async function* (body, request) {
       yield request.caller?.device?.name
       yield body
@@ -73,5 +74,14 @@ describe('caller identity', () => {
     const { connection, requests } = await connect()
     expect(await connection.sender.send('test/whoami')).toBeNull()
     expect(requests[0]).toEqual({ context: {} })
+  })
+})
+
+describe('service header', () => {
+  test('marks public paths', async () => {
+    const { connection } = await connect()
+    const services = connection.updates[0].services
+    expect(services.find((s: any) => s.path === 'test/public').public).toBeTrue()
+    expect('public' in services.find((s: any) => s.path === 'test/legacy')).toBeFalse()
   })
 })

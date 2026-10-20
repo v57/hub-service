@@ -111,6 +111,7 @@ export class MultiplatformService {
         path,
         permissions: settings.permissions,
         limit: settings.limit,
+        public: settings.public || undefined,
       })
     }
     for (const path of Object.keys(this.channel.streamApi.storage)) {
@@ -119,6 +120,7 @@ export class MultiplatformService {
         path,
         permissions: settings.permissions,
         limit: settings.limit,
+        public: settings.public || undefined,
       })
     }
     const apps = this.apps
@@ -570,6 +572,8 @@ export interface AppHeader {
 export interface ApiSettings {
   permissions?: ServicePermissions
   limit?: number
+  /** Callable by anyone, also on hubs in default-deny mode */
+  public?: boolean
 }
 export interface ServicePermissions {
   group?: string
