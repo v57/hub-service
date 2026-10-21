@@ -16,13 +16,13 @@ export interface FakeConnection {
 }
 
 export interface FakeHubOptions {
-  /** Answer `hub/info` like hub-pro. Off behaves like hub-lite. */
+  /** Answer `hub/info` like hub-server. Off behaves like hub-lite. */
   info?: boolean
   /** Rejects connections with this reason instead of accepting them. */
   refuse?: (connection: { version: string; key?: string }) => string | undefined
 }
 
-/** A minimal hub that checks v0/v1 tokens the way hub-pro does and records what services send. */
+/** A minimal hub that checks v0/v1 tokens the way hub-server does and records what services send. */
 export class FakeHub {
   readonly key = new KeyFile(vectors.keys.hub.keyFile)
   readonly channel = new Channel<FakeConnection>()
@@ -59,7 +59,7 @@ export class FakeHub {
   private refuse?: FakeHubOptions['refuse']
   start(): number {
     const hub = this
-    // Refused connections fail the upgrade like hub-pro, without the test runner reporting the throw
+    // Refused connections fail the upgrade like hub-server, without the test runner reporting the throw
     const serve = Bun.serve
     ;(Bun as any).serve = (options: any) => serve({ ...options, error: () => new Response('refused', { status: 403 }) })
     let server: Server<any>

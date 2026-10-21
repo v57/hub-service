@@ -55,7 +55,7 @@ export interface ServiceIdentity {
   certificate?(): Promise<string | undefined>
 }
 
-/** Result of `hub/info` (hub-pro only). */
+/** Result of `hub/info` (hub-server only). */
 export interface HubInfo {
   key: string
   protocol: number
