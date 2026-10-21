@@ -173,14 +173,27 @@ new Service({ name: 'Hasher', icon: { symbol: 'number', text: '#' } })
 
 | Helper | Element |
 |---|---|
-| `text(value)` or a plain string | Text |
+| `text(value)` or a plain string | Text. `text(value, { style, color, secondary })` styles it |
+| `markdown(value)` | Inline Markdown: bold, italic, code, links |
+| `image({ url } \| { symbol }, { width, height, mode, cornerRadius, color })` | Remote image or SF Symbol |
+| `badge(value, { color })` | Small colored label; `up`, `down`, `pending` and other status words pick a color |
+| `link(title, url, { icon })` | Opens a web page in the browser |
+| `divider()` | Line |
 | `textField(value, { placeholder, action })` | Text field. `action` runs on submit |
-| `button(title, action)` | Button |
+| `button(title, action, { icon, style, confirm })` | Button. `confirm: { title, message, button, destructive }` asks first |
+| `sheet(title, content, { icon })` | Button that opens `content` in a sheet |
 | `slider(value, { defaultValue, min, max, step, action })` | Slider |
-| `progress(value, { min, max })` | Progress bar |
+| `progress(value, { min, max })` | Small progress ring |
 | `picker(options, selected)` | Picker |
+| `stat(title, value, { unit, delta, deltaFormat, positive, sparkline, icon, color })` | Dashboard number with its change and a sparkline |
+| `gauge(value, { min, max, title, label, style, color, thresholds })` | Ring, semicircle or bar gauge |
+| `chart(kind, series, { title, x, height, stacked, legend, yMin, yMax, unit })` | `line`, `bar`, `area`, `pie` or `donut` chart of one or more `series(name, data, { color })` |
+| `table(data, columns)` | Rows from a `data` array, columns from `column(title, key, { align, style })` or key names |
 | `cell(title, subtitle)` | List row with a title and subtitle |
-| `list(data, content)` | Repeats `content` for each item of the `data` array |
+| `list(data, content)` | Repeats `content` for each item of the `data` array; the item's keys come first in bindings |
+| `grid(content, { columns, minWidth, spacing })` | Fixed or adaptive columns |
+| `section(title, content, { subtitle, style })` | Titled group on a card |
+| `tabs([tab(title, content, { icon })], { selected, style })` | Segmented pages |
 | `files(value, title, action)` | File list |
 | `fileOperation(format, title, action)` | File operation (`format` sets the output file extension) |
 | `hstack(content, { spacing })`, `vstack(...)`, `zstack(content)`, `spacer()` | Layout |
@@ -190,6 +203,54 @@ to an open app, pass a `LazyState` from `channel/more` as the fourth argument; e
 to the app. `app.actions(action({ path, body, output, execute }))` registers an API together with its
 action.
 
+Chart data is a `$key` of an array or the array itself. A point is a number (x is its index), `[x, y]`,
+`{ x, y }` or `{ label, value }`; with `x: 'time'`, x is Unix milliseconds or an ISO date. Send fresh arrays
+from the `LazyState` and charts, stats and gauges animate to them.
+
+### Widgets
+
+An app can also be a Home widget. It declares the sizes it supports (width x height, in Home tiles: `1x1`,
+`1x2`, `2x1`, `2x2`); the user picks one per widget, and tapping the widget opens the app.
+
+```ts
+import { App, chart, series, stat, widget } from 'hub-service/app'
+
+// A widget whose full page is its own body
+const users = widget({ name: 'Active Users', path: 'social/users', icon: 'person.2' }, [stat('Active', '$active')], {
+  sizes: ['1x1', '2x1'],
+  bodies: { '2x1': [stat('Active', '$active'), chart('line', series('Active', '$history'))] },
+  data: { active: 1200, history: [1100, 1180, 1200] },
+})
+// Or any app with a widget
+const app = new App({ type: 'app', name: 'Sales', path: 'sales/ui' }, body).widget({ sizes: ['2x2'], body: [stat('Today', '$today')] })
+```
+
+### Web apps
+
+`webApp({ name, path, url, icon, origins, token, secret, lifetime })` publishes a web page instead of
+elements. The Hub app opens it in a web view and keeps it on `url`'s origin and `origins`; other links ask
+the user and open in the browser. `{hubHost}` in `url` becomes the host the Hub app uses for the hub, for
+pages served next to it.
+
+The page gets `window.hub`: `hub.token()` returns a short-lived token from `<path>/token` that names the hub
+and the caller, signed by the service, and `hub.send(path, body)` calls APIs under `<path>/` as the user.
+The page sends the token to its own server, which checks it with `app.verifyToken(token)`.
+
+```ts
+const admin = webApp({ name: 'Admin', path: 'social/admin', url: 'http://{hubHost}:8090/' })
+Bun.serve({
+  port: 8090,
+  async fetch(request) {
+    const token = await admin.verifyToken(request.headers.get('authorization') ?? '') // throws when invalid
+    return Response.json({ caller: token.caller, owner: token.owner })
+  },
+})
+service.app(admin)
+```
+
+The full protocol, for other SDKs and clients, is in the Hub docs (`Docs/Apps/ui.md`); every element is in
+the shared fixture `testdata/apps/interface.json`.
+
 ## Wire contract
 
 Any client that speaks [Channel](https://github.com/v57/channel) can act as a service:
@@ -198,7 +259,7 @@ Any client that speaks [Channel](https://github.com/v57/channel) can act as a se
    and `v: 0`. `expiry` is a Unix time in seconds (the SDK uses now + 10 s), `signature` is the Ed25519
    signature of that string, and both keys are base64.
 2. Send `hub/profile/update` with `{ name, icon }` (only when either is set).
-3. Send `hub/service/update` with `{ services: [{ path, permissions, limit }], apps: [{ type, name, path }] }`.
+3. Send `hub/service/update` with `{ services: [{ path, permissions, limit }], apps: [{ type, name, path, icon?, widget?, web? }] }`.
 4. Answer the post and stream requests for those paths.
 
 The hub forgets a connection's services when it disconnects, so steps 1 to 3 run again on every
