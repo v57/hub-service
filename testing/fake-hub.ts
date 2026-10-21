@@ -30,6 +30,9 @@ export class FakeHub {
   infoCalls = 0
   describes: any[] = []
   data: any[] = []
+  /** Paths granted per caller key, for `hub/grant/check` */
+  grants = new Map<string, Set<string>>()
+  grantChecks: any[] = []
   /** Connection whose describe/data calls are accepted; the first reporter by default. */
   reporter?: FakeConnection
   server?: Server<any>
@@ -46,6 +49,10 @@ export class FakeHub {
         if (body?.reporter && state.device && !this.reporter) this.reporter = state
       })
       .post('hub/profile/update', () => {})
+      .post('hub/grant/check', ({ body }) => {
+        this.grantChecks.push(body)
+        return { allowed: this.grants.get(body?.caller?.key)?.has(body?.path) === true }
+      })
       .post('hub/device/describe', ({ body, state }) => {
         if (this.reporter !== state) throw 'not the device reporter'
         this.describes.push(body)
@@ -96,6 +103,10 @@ export class FakeHub {
   }
   stop() {
     this.server?.stop(true)
+  }
+  /** Request context the way the hub forwards a call from `caller` */
+  context(caller: Record<string, unknown>, extra: Record<string, unknown> = {}) {
+    return { ...extra, hub: { hubKey: this.key.publicKey, caller: { groups: [], owner: false, ...caller } } }
   }
   get open(): FakeConnection[] {
     return this.connections.filter(connection => !connection.closed)

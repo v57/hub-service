@@ -1,8 +1,10 @@
 import { basename } from 'node:path'
 import { NetworkService, type ServiceOptions } from './service'
 import { DeviceCertificates, deviceModeEnabled, type DeviceOptions } from './device'
-export type { Context, Caller, ServiceRequest, ServiceProvider, ServiceIdentity, HubKeyStore, HubInfo } from './service'
-export { HubRefusedError, normalizeHubAddress } from './service'
+export type { Context, Caller, ServiceProvider, ServiceIdentity, HubKeyStore, HubInfo, ServiceHealth, ApiSettings } from './service'
+export { HubRefusedError, normalizeHubAddress, ServiceRequest } from './service'
+export type { Auth, Requirements, DelegatedUser, Validator, RateLimit } from './request'
+export { HubError, ChannelError, errorCode, type HubErrorCode } from './errors'
 export type * from './device-api'
 export * from './network'
 export { publicKey, signChallenge, HubKeyFile, ServiceKey, type ServiceKeySource } from './keychain'
@@ -50,4 +52,25 @@ export class Service extends NetworkService {
     this.key = key
     this.device = device
   }
+  /**
+   * Shuts this service down gracefully (`shutdown`) on SIGTERM or SIGINT, then exits once every service that asked
+   * for it has stopped. `timeout` is in milliseconds.
+   */
+  shutdownOnSignals(options: { timeout?: number } = {}): this {
+    signalled.set(this, options)
+    if (!signalHandler) {
+      signalHandler = async () => {
+        process.off('SIGTERM', signalHandler!)
+        process.off('SIGINT', signalHandler!)
+        await Promise.all(Array.from(signalled, ([service, options]) => service.shutdown(options)))
+        process.exit(0)
+      }
+      process.on('SIGTERM', signalHandler)
+      process.on('SIGINT', signalHandler)
+    }
+    return this
+  }
 }
+
+const signalled = new Map<Service, { timeout?: number }>()
+let signalHandler: (() => Promise<void>) | undefined

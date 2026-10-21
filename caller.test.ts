@@ -39,7 +39,7 @@ describe('caller identity', () => {
     const { connection, requests } = await connect()
     const context = { ...vectors.caller.context, service: 'abc' }
     expect(await connection.sender.send('test/whoami', null, { context })).toBe(vectors.keys.service.publicKey)
-    expect(requests[0]).toEqual({ caller: vectors.caller.context.hub.caller, context: { service: 'abc' } })
+    expect(requests[0]).toMatchObject({ caller: vectors.caller.context.hub.caller, context: { service: 'abc' } })
   })
 
   test('passes the hub caller to stream handlers', async () => {
@@ -61,7 +61,8 @@ describe('caller identity', () => {
     const { connection, requests } = await connect()
     const context = { hub: { ...vectors.caller.context.hub, hubKey: vectors.keys.device.publicKey } }
     expect(await connection.sender.send('test/whoami', null, { context })).toBeNull()
-    expect(requests[0]).toEqual({ context: {} })
+    expect(requests[0]).toMatchObject({ context: {} })
+    expect(requests[0]!.caller).toBeUndefined()
   })
 
   test('ignores a caller when the hub key is not pinned', async () => {
@@ -73,7 +74,8 @@ describe('caller identity', () => {
   test('has no caller without context', async () => {
     const { connection, requests } = await connect()
     expect(await connection.sender.send('test/whoami')).toBeNull()
-    expect(requests[0]).toEqual({ context: {} })
+    expect(requests[0]).toMatchObject({ context: {} })
+    expect(requests[0]!.caller).toBeUndefined()
   })
 })
 

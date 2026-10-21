@@ -100,6 +100,13 @@ service.post('llm/local', chat, { limit: 4 })
 
 A hub in local mode allows every call, so `permissions` has no effect there.
 
+### Authorization, errors, limits and shutdown
+
+Services that real users call need more than a path: who may call it (`auth`, `groups`, a hub-granted `permission`,
+end users through a gateway), errors with codes, input validation, per-caller rate limits, cancellation, readiness
+and graceful shutdown. [Service features](service-features.md) describes them in TypeScript and Swift, the hub APIs
+behind them (`hub/grant/check`, `draining`) and what the other ports need to follow.
+
 ### Profile
 
 `name` and `icon` tell the Hub app how to show your service:

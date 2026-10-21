@@ -71,6 +71,10 @@ Options:
   working directory's name
 - `device?: DeviceOptions | false` (Bun) - device key path, name, platform, parent and certificate lifetime, or
   `false` to connect without a device
+- `delegates?: string[]` - hub groups whose members may act for end users (`context.user` → `request.user`)
+- `rateLimit?: RateLimit` - default per-caller limit of every path
+- `grantCache?: number` - seconds to keep `hub/grant/check` answers (default 0)
+- `ready?: boolean` - false to connect without taking calls until `setReady(true)`
 - `key?: string | KeyFile | ServiceKey` (Bun) - this service's key: a key file path (created on first use, hub pins
   in `hubs.json` beside it), key text, or a `KeyFile` (hub pins in memory). Defaults to `./auth`. Services with
   different keys can run in one process; give each its own `instance` (or `name`) so their device certificates don't
@@ -86,18 +90,38 @@ Register a request handler.
 service.post('math/add', body => body.a + body.b)
 ```
 
-Handlers get a second argument `{ caller, context }`. `caller` is who made the request, as the hub reports it:
-`{ key?, device?: { id, name }, groups?, owner? }`. It is set only when the hub that forwarded the request is the
-pinned hub, so a hub that passes client context through can't be used to forge it.
+Handlers get a second argument, the `ServiceRequest`: `caller`, `context`, `user`, `path`, `signal` and checks.
+`caller` is who made the request, as the hub reports it: `{ key?, device?: { id, name }, groups?, owner? }`. It is
+set only when the hub that forwarded the request is the pinned hub, so a hub that passes client context through
+can't be used to forge it.
 
 ```ts
-service.post('git/push', (body, { caller }) => {
-  if (!caller?.owner) throw 'permissions required'
+service.post('git/push', (body, request) => {
+  request.requireOwner() // throws HubError unauthorized / forbidden
   // ...
 })
 ```
 
-Settings may mark a path `public: true`: callable by anyone on hubs in `default-deny` mode.
+Settings:
+
+- `auth: 'key' | 'device' | 'owner' | 'user'`, `groups: [...]`, `permission: 'posts/moderate'`: who may call,
+  checked before the handler (`permission` asks the hub with `hub/grant/check`)
+- `input`: a validator function or schema with `parse` (zod works); the handler gets its result
+- `rateLimit: { limit, window, by?, bucket? }`: calls per caller per window (seconds), or `false`
+- `limit`: calls the hub runs at once on this provider; `public: true`: callable by anyone on `default-deny` hubs
+- `shutdown: 'wait' | 'end'`: what `shutdown()` does with a running call
+
+```ts
+service.post('posts/delete', ({ id }, request) => posts.delete(id, request.signal), {
+  permission: 'posts/moderate',
+  input: z.object({ id: z.string() }),
+  rateLimit: { limit: 30, window: 60 },
+})
+```
+
+Throw `HubError` for errors with a code (`HubError.notFound('post not found', { id })`); callers get a
+`ChannelError` with the same message, code and info. [Service features](docs/service-features.md) has the details:
+error codes, end users through a gateway (`delegates`, `context.user`), cancellation, readiness and shutdown.
 
 ### `stream(path, handler, settings?)`
 
@@ -122,8 +146,16 @@ Collect streamed values after `start()` has been called.
 
 ### `stop()`
 
-Disconnects from the hub and stops reconnecting. Sends that are waiting fail and `reportDeviceData` loops end;
-`start()` connects again.
+Disconnects from the hub and stops reconnecting. Sends that are waiting fail, running handlers' signals abort and
+`reportDeviceData` loops end; `start()` connects again.
+
+### `shutdown({ timeout? })`, `setReady(ready)`, `health`
+
+`shutdown` stops new calls (the hub routes them to other providers), ends running streams, waits up to `timeout`
+milliseconds (10 s) for running posts, then stops; it resolves true when everything finished.
+`shutdownOnSignals({ timeout })` (Bun) does it on SIGTERM and SIGINT, then exits. The `ready: false` option and
+`setReady(false)` keep the paths registered without taking calls. `health` is
+`{ status, connected, ready, running }`.
 
 ### `publicKey()`
 
