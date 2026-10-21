@@ -1,6 +1,6 @@
 # hub-service documentation
 
-`hub-service` is the SDK for writing [Hub](https://github.com/v57/hub-pro) services and clients. A service
+`hub-service` is the SDK for writing [Hub](https://github.com/v57/hub-server) services and clients. A service
 connects to a Hub and publishes APIs by path (for example `hash/sha256`). Any connection can then call
 those APIs through the Hub by name. When several services publish the same path, the Hub splits the
 requests between them.
@@ -16,11 +16,11 @@ same wire contract and is checked against a live hub with [`tests/verify.ts`](..
 
 ## Quick start
 
-1. Start a hub. Hub Lite has no security and is the quickest for development; Hub Pro adds keys and
-   permissions. Both listen on port `1997`.
+1. Start a hub on port `1997`. Local mode is the quickest for development: it listens on `127.0.0.1` only and
+   allows every call.
 
    ```sh
-   bunx v57/hub-lite   # or: bunx v57/hub-pro, or the hub CLI: bunx v57/hub
+   bunx v57/hub-server --local   # or the hub CLI: bunx v57/hub
    ```
 
 2. Add the SDK and publish an API:
@@ -93,12 +93,12 @@ service.post('launcher/update', update, { permissions: { group, name: 'Update ap
 service.post('llm/local', chat, { limit: 4 })
 ```
 
-- `permissions`: `{ name, group?, allows? }`. On Hub Pro, only connections given this permission can call
+- `permissions`: `{ name, group?, allows? }`. Only connections given this permission can call
   the API (owners always can). `name` is the label shown for it, `allows: true` grants it by default, and
   `group` defaults to the first path segment of the first API that sets permissions.
 - `limit`: how many requests this service handles at the same time.
 
-Hub Lite ignores both.
+A hub in local mode allows every call, so `permissions` has no effect there.
 
 ### Profile
 
@@ -111,12 +111,12 @@ new Service({ name: 'Hasher', icon: { symbol: 'number', text: '#' } })
 `icon.symbol` is an SF Symbol name and `icon.text` is a short text fallback. Each one can also be an
 object: `{ name, color: { foreground, background, foregroundDark, backgroundDark } }`.
 
-### Auth (Hub Pro)
+### Auth
 
 Every service has an Ed25519 key. On the first run the SDK creates it in a file named `auth` in the working
 directory and reuses it after that. Keep that file private: it is the service's identity.
 
-On Hub Pro, an owner has to allow a service's key before it can host APIs. The Hub app shows new keys
+An owner has to allow a service's key before it can host APIs. The Hub app shows new keys
 under Security. To look up a service's public key:
 
 ```ts
@@ -194,7 +194,7 @@ action.
 
 Any client that speaks [Channel](https://github.com/v57/channel) can act as a service:
 
-1. Open a WebSocket to the hub. For Hub Pro, send the headers `auth: key.<publicKey>.<signature>.<expiry>`
+1. Open a WebSocket to the hub. Send the headers `auth: key.<publicKey>.<signature>.<expiry>`
    and `v: 0`. `expiry` is a Unix time in seconds (the SDK uses now + 10 s), `signature` is the Ed25519
    signature of that string, and both keys are base64.
 2. Send `hub/profile/update` with `{ name, icon }` (only when either is set).
@@ -210,7 +210,7 @@ All ports share the API above (`post`, `stream`, `app`, `send`, `values`, `start
 Each one is built on the Channel port for its language and is checked against a live hub with this repo's
 `tests/verify.ts`. Each port's README has its full API.
 
-| Language | Library | Hub Pro auth |
+| Language | Library | Auth |
 |---|---|---|
 | TypeScript | [hub-service](https://github.com/v57/hub-service) (reference) | yes |
 | Swift | [HubService](https://github.com/v57/HubService) (used by the Hub app, includes SwiftUI views) | yes (Keychain) |
