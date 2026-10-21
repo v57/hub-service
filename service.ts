@@ -254,7 +254,7 @@ export class MultiplatformService {
       this.isDeviceReporter = true
       return true
     } catch (error) {
-      if (error === 'not the device reporter') this.isDeviceReporter = false
+      if (String(error) === 'not the device reporter') this.isDeviceReporter = false
       return false
     }
   }
@@ -303,7 +303,7 @@ export class MultiplatformService {
       this.stopDescribeRetry()
       return true
     } catch (error) {
-      if (error === 'not the device reporter') this.isDeviceReporter = false
+      if (String(error) === 'not the device reporter') this.isDeviceReporter = false
       this.startDescribeRetry()
       return false
     }
