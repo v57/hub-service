@@ -187,6 +187,17 @@ describe('rate limits', () => {
     expect(await call(connection, 't/free', alice)).toBe('free')
   })
 
+  test('paths naming the same bucket share it', async () => {
+    const connection = await start(s =>
+      s
+        .post('t/x', () => 'x', { rateLimit: { limit: 1, window: 60, bucket: 'writes' } })
+        .post('t/y', () => 'y', { rateLimit: { limit: 1, window: 60, bucket: 'writes' } }),
+    )
+    expect(await call(connection, 't/x', alice)).toBe('x')
+    expect(await failure(call(connection, 't/y', alice))).toBe('rate limited|rate_limited')
+    expect(await failure(call(connection, 't/x', alice))).toBe('rate limited|rate_limited')
+  })
+
   test('delegated users are limited by user', async () => {
     const connection = await start(s => s.post('t/limited', (_, request) => request.user?.id ?? null, { rateLimit: { limit: 1, window: 60 } }), {
       delegates: ['gateways'],

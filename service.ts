@@ -385,7 +385,8 @@ export class MultiplatformService {
   }
   private limiter(bucket: string, options: RateLimit): RateLimiter {
     let limiter = this.limiters.get(bucket)
-    if (!limiter || limiter.options !== options) {
+    // Paths sharing a bucket share its counts; a changed limit starts over
+    if (!limiter || limiter.options.limit !== options.limit || limiter.options.window !== options.window) {
       limiter = new RateLimiter(options)
       this.limiters.set(bucket, limiter)
     }
