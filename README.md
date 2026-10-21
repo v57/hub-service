@@ -71,6 +71,10 @@ Options:
   working directory's name
 - `device?: DeviceOptions | false` (Bun) - device key path, name, platform, parent and certificate lifetime, or
   `false` to connect without a device
+- `key?: string | KeyFile | ServiceKey` (Bun) - this service's key: a key file path (created on first use, hub pins
+  in `hubs.json` beside it), key text, or a `KeyFile` (hub pins in memory). Defaults to `./auth`. Services with
+  different keys can run in one process; give each its own `instance` (or `name`) so their device certificates don't
+  share an instance name. `service.key.publicKey()` returns its public key.
 
 `name` and `icon` are sent as the service profile when a client connects.
 
@@ -116,9 +120,14 @@ Send a message after `start()` has been called.
 
 Collect streamed values after `start()` has been called.
 
+### `stop()`
+
+Disconnects from the hub and stops reconnecting. Sends that are waiting fail and `reportDeviceData` loops end;
+`start()` connects again.
+
 ### `publicKey()`
 
-Returns the public key for the current auth keypair.
+Returns the public key of the default `./auth` keypair (`service.key.publicKey()` for a service's own key).
 
 ### Network shares
 
@@ -160,7 +169,8 @@ selected port through `getSharePublication(name)`.
 
 ## Auth
 
-- The Bun runtime stores the generated keypair in a file named `auth` in the current working directory.
+- The Bun runtime stores the generated keypair in a file named `auth` in the current working directory, or in the file
+  the `key` option names.
 - The file is base64 encoded and contains both private and public key material.
 - The file is ignored by git in this repo.
 - The web runtime stores the key in `localStorage` under `auth` when possible, otherwise in memory.
@@ -200,7 +210,8 @@ a provider on a given device with `send(path, body, { context: { device: id } })
 
 ## Apps
 
-Import the side-effect module before using `service.app(...)`:
+Import the side-effect module before using `service.app(...)` (on any service, `MultiplatformService` and the web
+`Service` included):
 
 ```ts
 import { Service } from 'hub-service'

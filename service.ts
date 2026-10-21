@@ -86,7 +86,7 @@ export class MultiplatformService {
   /** Called when the hub refuses the connection. */
   onError?: (error: HubRefusedError) => void
   /** Rejects sends that are waiting when a refusal comes in */
-  private waitingSends = new Set<(error: HubRefusedError) => void>()
+  private waitingSends = new Set<(error: Error) => void>()
   /** Asks for the reporter role of this service's device. */
   readonly reporter: boolean
   /** The last description passed to `describeDevice`, sent again on every connect. */
@@ -94,7 +94,11 @@ export class MultiplatformService {
   /** True once the hub accepted this connection's description; false when another service reports for the device. */
   isDeviceReporter?: boolean
   private describeRetry?: ReturnType<typeof setInterval>
+  /** Stops the `reportDeviceData` loops, for `stop()` */
+  private reports = new Set<() => void>()
   private isOpen = false
+  /** Set by `stop()`, so the closing connection isn't taken for a refusal */
+  private isStopped = false
   private hubKeyLoaded = false
   private readonly initialHubKey?: string
   private readonly memoryHubKeys = new MemoryHubKeys()
@@ -112,6 +116,7 @@ export class MultiplatformService {
     }
   }
   start(): this {
+    this.isStopped = false
     const services: ServiceHeader[] = []
     for (const path of Object.keys(this.channel.postApi.storage)) {
       const settings = this.settings[path] ?? {}
@@ -174,9 +179,22 @@ export class MultiplatformService {
       this.isOpen = false
       onclose?.()
       // Channel sets isRunning to false when the upgrade is answered without a WebSocket
-      if (wasOpen || ws.isRunning) return
+      if (wasOpen || ws.isRunning || this.isStopped) return
       this.refused(new HubRefusedError(this.hubAddress, this.connectedVersion === '1' ? this.hubKey : undefined))
     }
+  }
+  /** Disconnects from the hub and stops reconnecting; sends that are waiting fail. `start()` connects again. */
+  stop() {
+    this.isStopped = true
+    this.isOpen = false
+    this.stopDescribeRetry()
+    ;[...this.reports].forEach(stop => stop())
+    const sender = this.sender
+    this.sender = undefined
+    sender?.stop()
+    const waiting = [...this.waitingSends]
+    this.waitingSends.clear()
+    waiting.forEach(reject => reject(new Error('Service stopped')))
   }
   private refused(error: HubRefusedError) {
     this.refusedError = error
@@ -241,7 +259,7 @@ export class MultiplatformService {
     }
   }
 
-  /** Calls `collect` every `interval` milliseconds and sends the result as live data. Returns a stop function. */
+  /** Calls `collect` every `interval` milliseconds and sends the result as live data. Returns a stop function; `stop()` ends it too. */
   reportDeviceData(interval: number, collect: () => DeviceData | Promise<DeviceData>): () => void {
     let running = true
     let timer: ReturnType<typeof setTimeout> | undefined
@@ -254,10 +272,13 @@ export class MultiplatformService {
       if (running) timer = setTimeout(tick, interval)
     }
     timer = setTimeout(tick, 0)
-    return () => {
+    const stop = () => {
       running = false
       if (timer) clearTimeout(timer)
+      this.reports.delete(stop)
     }
+    this.reports.add(stop)
+    return stop
   }
 
   /** Devices with their services, presence and capabilities (`hub/devices`, owners and grants). Yields `Device[]`. */
@@ -387,7 +408,7 @@ export class MultiplatformService {
     if (!this.sender) throw 'Service not started'
     if (this.refusedError) return Promise.reject(this.refusedError)
     const response = this.sender.send(path, body, options)
-    let reject!: (error: HubRefusedError) => void
+    let reject!: (error: Error) => void
     const refused = new Promise<never>((_, r) => (reject = r))
     this.waitingSends.add(reject)
     return Promise.race([response, refused]).finally(() => this.waitingSends.delete(reject))

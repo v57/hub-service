@@ -1,4 +1,4 @@
-import { Service } from '.'
+import { MultiplatformService } from './service'
 import type { AppHeader } from './service'
 import { LazyState } from 'channel/more'
 
@@ -43,13 +43,14 @@ export class App {
   }
 }
 
-declare module '.' {
-  interface Service {
-    app(app: App): Service
+declare module './service' {
+  interface MultiplatformService {
+    /** Publishes an app: its stream at `app.header.path` and its actions */
+    app(app: App): this
   }
 }
 
-Service.prototype.app = function (app: App): Service {
+MultiplatformService.prototype.app = function <T extends MultiplatformService>(this: T, app: App): T {
   this.apps.push(app.header)
   const state = app.state
   for (const action of app.executableActions) {
