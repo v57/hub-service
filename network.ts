@@ -231,11 +231,14 @@ const MACOS_AGENT_SOCKET = '/var/run/hub-net/agent.sock'
 
 /**
  * Where this machine's agent listens: `HUB_NET_AGENT_SOCKET`, the system agent's socket, or else the Hub app's,
- * which runs as the user and can't create one under `/var/run` (`~/.hub-net/agent.sock`)
+ * which runs as the user and can't create one under `/var/run`: in its sandbox container, or `~/.hub-net` when
+ * it runs unsandboxed
  */
 export function defaultAgentSocket(env: Record<string, string | undefined> = process.env, exists = existsSync): string {
   if (env.HUB_NET_AGENT_SOCKET) return env.HUB_NET_AGENT_SOCKET
   if (exists(MACOS_AGENT_SOCKET) || !env.HOME) return MACOS_AGENT_SOCKET
+  const sandboxed = join(env.HOME, 'Library', 'Containers', 'dev.v57.Hub', 'Data', '.hub-net', 'agent.sock')
+  if (exists(sandboxed)) return sandboxed
   return join(env.HOME, '.hub-net', 'agent.sock')
 }
 const MAX_SHARE_NAME_LENGTH = 255

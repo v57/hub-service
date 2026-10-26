@@ -599,9 +599,11 @@ function publication(
 }
 
 describe('defaultAgentSocket', () => {
-  test('the environment, the system agent, then the Hub app\'s socket in the home folder', () => {
+  test('the environment, the system agent, then the Hub app\'s socket in its container or the home folder', () => {
     expect(defaultAgentSocket({ HUB_NET_AGENT_SOCKET: '/tmp/a.sock', HOME: '/Users/me' }, () => true)).toBe('/tmp/a.sock')
     expect(defaultAgentSocket({ HOME: '/Users/me' }, () => true)).toBe('/var/run/hub-net/agent.sock')
+    const container = '/Users/me/Library/Containers/dev.v57.Hub/Data/.hub-net/agent.sock'
+    expect(defaultAgentSocket({ HOME: '/Users/me' }, path => path === container)).toBe(container)
     expect(defaultAgentSocket({ HOME: '/Users/me' }, () => false)).toBe('/Users/me/.hub-net/agent.sock')
   })
 })
