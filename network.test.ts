@@ -1,5 +1,6 @@
 import { describe, expect, test, beforeEach } from 'bun:test'
 import {
+  defaultAgentSocket,
   HUB_NETWORK_WIRE_VERSION,
   NetworkPublisher,
   validateNetworkShare,
@@ -596,3 +597,11 @@ function publication(
     port,
   }
 }
+
+describe('defaultAgentSocket', () => {
+  test('the environment, the system agent, then the Hub app\'s socket in the home folder', () => {
+    expect(defaultAgentSocket({ HUB_NET_AGENT_SOCKET: '/tmp/a.sock', HOME: '/Users/me' }, () => true)).toBe('/tmp/a.sock')
+    expect(defaultAgentSocket({ HOME: '/Users/me' }, () => true)).toBe('/var/run/hub-net/agent.sock')
+    expect(defaultAgentSocket({ HOME: '/Users/me' }, () => false)).toBe('/Users/me/.hub-net/agent.sock')
+  })
+})

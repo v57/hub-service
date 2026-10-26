@@ -5,6 +5,9 @@
  * and attestation handling for Bun services.
  */
 
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+
 export const HUB_NETWORK_WIRE_VERSION = 1 as const
 
 export type WireVersion = typeof HUB_NETWORK_WIRE_VERSION
@@ -225,6 +228,16 @@ export interface NetworkPublisherOptions {
 }
 
 const MACOS_AGENT_SOCKET = '/var/run/hub-net/agent.sock'
+
+/**
+ * Where this machine's agent listens: `HUB_NET_AGENT_SOCKET`, the system agent's socket, or else the Hub app's,
+ * which runs as the user and can't create one under `/var/run` (`~/.hub-net/agent.sock`)
+ */
+export function defaultAgentSocket(env: Record<string, string | undefined> = process.env, exists = existsSync): string {
+  if (env.HUB_NET_AGENT_SOCKET) return env.HUB_NET_AGENT_SOCKET
+  if (exists(MACOS_AGENT_SOCKET) || !env.HOME) return MACOS_AGENT_SOCKET
+  return join(env.HOME, '.hub-net', 'agent.sock')
+}
 const MAX_SHARE_NAME_LENGTH = 255
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -343,7 +356,7 @@ export class NetworkPublisher {
 
   constructor(attestationProvider?: AttestationProvider, options: NetworkPublisherOptions = {}) {
     this.attestationProvider = attestationProvider
-    this.agentSocketPath = options.agentSocketPath ?? MACOS_AGENT_SOCKET
+    this.agentSocketPath = options.agentSocketPath ?? defaultAgentSocket()
     this.agentTimeoutMs = options.agentTimeoutMs ?? 5_000
   }
 
