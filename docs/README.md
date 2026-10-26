@@ -234,17 +234,23 @@ const app = new App({ type: 'app', name: 'Sales', path: 'sales/ui' }, body).widg
 
 ### Web apps
 
-`webApp({ name, path, url, icon, origins, token, secret, lifetime })` publishes a web page instead of
+`webApp({ name, path, url, icon, origins, share, token, secret, lifetime })` publishes a web page instead of
 elements. The Hub app opens it in a web view and keeps it on `url`'s origin and `origins`; other links ask
 the user and open in the browser. `{hubHost}` in `url` becomes the host the Hub app uses for the hub, for
 pages served next to it.
+
+`share` names the network share the page is served from. Declare it with `service.share(name, 'tcp', host, port,
+policy)` on the hub's machine: the hub's link to that machine then opens the port for the devices the policy lets
+in, so a device away from the hub's network loads the page over the Hub Network. The server must listen on the
+machine's addresses (`0.0.0.0`), not only on loopback.
 
 The page gets `window.hub`: `hub.token()` returns a short-lived token from `<path>/token` that names the hub
 and the caller, signed by the service, and `hub.send(path, body)` calls APIs under `<path>/` as the user.
 The page sends the token to its own server, which checks it with `app.verifyToken(token)`.
 
 ```ts
-const admin = webApp({ name: 'Admin', path: 'social/admin', url: 'http://{hubHost}:8090/' })
+const admin = webApp({ name: 'Admin', path: 'social/admin', url: 'http://{hubHost}:8090/', share: 'admin' })
+service.share('admin', 'tcp', '127.0.0.1', 8090, { mode: 'hub' })
 Bun.serve({
   port: 8090,
   async fetch(request) {

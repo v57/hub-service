@@ -151,6 +151,11 @@ describe('web apps', () => {
     expect(app.body[1]).toEqual({ type: 'link', title: 'Open Admin', url: 'http://localhost:8080/' })
   })
 
+  test('name the share they are served from', () => {
+    const app = webApp({ name: 'Admin', path: 'social/admin', url: 'http://{hubHost}:8080/', share: 'admin-web', token: false })
+    expect(app.header.web).toEqual({ url: 'http://{hubHost}:8080/', share: 'admin-web' })
+  })
+
   test('without tokens', () => {
     const app = webApp({ name: 'Docs', path: 'docs', url: 'https://example.com', token: false })
     expect(app.header.web).toEqual({ url: 'https://example.com' })

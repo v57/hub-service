@@ -39,6 +39,12 @@ export interface WebHeader {
   origins?: string[]
   /** The Hub app fetches a signed page token from `<path>/token` and hands it to the page */
   token?: boolean
+  /**
+   * The network share the page is served from (`service.share(name, 'tcp', host, port, policy)`). The hub's link to
+   * its machine opens the share's port for the devices its policy lets in, so a page next to the hub loads over the
+   * Hub Network too
+   */
+  share?: string
 }
 
 declare module './service' {
@@ -137,6 +143,8 @@ export interface WebAppOptions {
   icon?: string
   url: string
   origins?: string[]
+  /** The network share the page is served from, see `WebHeader.share` */
+  share?: string
   /** Issue signed page tokens at `<path>/token`. Defaults to true */
   token?: boolean
   /** HMAC key for page tokens; share it between instances of a service. Defaults to a random key per process */
@@ -152,6 +160,7 @@ export interface WebAppOptions {
 export function webApp(options: WebAppOptions): App {
   const web: WebHeader = { url: options.url }
   if (options.origins?.length) web.origins = options.origins
+  if (options.share) web.share = options.share
   const token = options.token ?? true
   if (token) web.token = true
   const header: AppHeader = { type: 'app', name: options.name, path: options.path, web }
