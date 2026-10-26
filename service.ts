@@ -635,12 +635,32 @@ export class NetworkService extends MultiplatformService {
     this.publicKey = publicKey
   }
 
+  /** First delay before publishing the shares again after a failure; it doubles up to 30 s */
+  shareRetryMs = 1_000
+  /** Counts connections, so retries for an earlier one stop */
+  private connections = 0
+
   protected override async onConnected(sender: Sender): Promise<void> {
     if (!this.network.hasShares) return
+    const connection = ++this.connections
+    if (await this.republishShares(sender)) return
+    // The agent may come up after the hub (the Hub app restarting): retry while this connection lasts
+    void (async () => {
+      for (let delay = this.shareRetryMs; ; delay = Math.min(delay * 2, 30_000)) {
+        await new Promise(resolve => setTimeout(resolve, delay))
+        if (connection !== this.connections || !this.health.connected) return
+        if (await this.republishShares(sender)) return
+      }
+    })()
+  }
+
+  private async republishShares(sender: Sender): Promise<boolean> {
     try {
       await this.network.republishAll(await this.publicKey(), this.signChallenge, sender)
+      return true
     } catch (error) {
       console.error('Failed to republish network shares:', error)
+      return false
     }
   }
 

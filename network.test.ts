@@ -12,6 +12,9 @@ import type {
   NetworkSharePublication,
   ResourceId,
 } from './index'
+import { authToken, KeyFile } from './keys'
+import { NetworkService } from './service'
+import { FakeHub, vectors, waitFor } from './testing/fake-hub'
 
 /**
  * Tests for hub-service network share functionality.
@@ -605,5 +608,39 @@ describe('defaultAgentSocket', () => {
     const container = '/Users/me/Library/Containers/dev.v57.Hub/Data/.hub-net/agent.sock'
     expect(defaultAgentSocket({ HOME: '/Users/me' }, path => path === container)).toBe(container)
     expect(defaultAgentSocket({ HOME: '/Users/me' }, () => false)).toBe('/Users/me/.hub-net/agent.sock')
+  })
+})
+
+describe('NetworkService', () => {
+  test('publishes its shares again until the agent answers', async () => {
+    const hub = new FakeHub()
+    const replaced: unknown[] = []
+    hub.channel.post('network/shares/replace', ({ body }) => {
+      replaced.push(body)
+      return { shares: [publication('hnr1_web', 8642)] }
+    })
+    const address = hub.start()
+    const serviceKey = new KeyFile(vectors.keys.service.keyFile)
+    const service = new NetworkService(
+      { sign: async hubKey => authToken(serviceKey, Math.round(Date.now() / 1000) + 60, hubKey) },
+      async () => 'proof',
+      async () => serviceKey.publicKey,
+      { address },
+    )
+    service.shareRetryMs = 20
+    let attempts = 0
+    service.network.setAttestationProvider(async (item, key) => {
+      if (++attempts < 3) throw new Error('agent not listening yet')
+      return attestValue(item, key)
+    })
+    service.share('web', 'tcp', '127.0.0.1', 8642, { mode: 'hub' }).start()
+    try {
+      await waitFor(() => replaced.length > 0)
+      expect(attempts).toBe(3)
+      expect(service.network.getPublication('web')?.port).toBe(8642)
+    } finally {
+      service.stop()
+      hub.stop()
+    }
   })
 })
