@@ -45,9 +45,13 @@ export function deviceId(devicePublicKey: string): string {
   return spkiDigest(devicePublicKey).slice(0, 32)
 }
 
-/** Six digits from the device key digest, shown as `ddd ddd` on both devices during approval. */
-export function safetyCode(devicePublicKey: string): string {
-  const n = parseInt(spkiDigest(devicePublicKey).slice(0, 8), 16) % 1_000_000
+/**
+ * Six digits shown as `ddd ddd` on both devices during approval. `codeValue` comes from the hub, on
+ * `hub/device/request`; `hubKey` is the key this side pinned, so equal codes mean both see the same hub.
+ */
+export function safetyCode(hubKey: string, devicePublicKey: string, codeValue: string): string {
+  const digest = createHash('sha256').update(`hubcode1:${hubKey}:${devicePublicKey}:${codeValue}`).digest('hex')
+  const n = parseInt(digest.slice(0, 8), 16) % 1_000_000
   const digits = n.toString().padStart(6, '0')
   return `${digits.slice(0, 3)} ${digits.slice(3)}`
 }

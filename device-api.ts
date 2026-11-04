@@ -55,6 +55,8 @@ export interface Device {
   lastSeen: string
   capabilities?: Capabilities
   services: { key: string; instance: string; name?: string; online: boolean; paths: string[] }[]
+  /** What its safety code covers: for owners and the device's own person */
+  codeValue?: string
 }
 
 export interface PendingDevice {
@@ -63,6 +65,17 @@ export interface PendingDevice {
   name?: string
   platform?: string
   parent?: string
+  /** Recompute it with `safetyCode` from `codeValue` and your pinned hub key before comparing */
   safetyCode: string
+  codeValue: string
   firstSeen: string
+}
+
+/** `hub/device/request`: where this connection's device stands. No code before `codeValue` arrives. */
+export interface DeviceRequest {
+  id: string
+  status: 'waiting' | 'pending' | 'approved'
+  /** What it asks for while pending, its final name once approved */
+  name?: string
+  codeValue?: string
 }

@@ -35,7 +35,9 @@ describe('device-layer vectors (Docs/Devices/vectors.json)', () => {
 
   test('device id and safety code', () => {
     expect(deviceId(device.publicKey)).toBe(vectors.keys.device.deviceId)
-    expect(safetyCode(device.publicKey)).toBe(vectors.keys.device.safetyCode)
+    for (const { hubKey, deviceKey, codeValue, code } of vectors.safetyCode.cases) {
+      expect(safetyCode(hubKey, deviceKey, codeValue)).toBe(code)
+    }
   })
 
   test('v0 auth token', () => {
