@@ -16,9 +16,13 @@ export interface FakeConnection {
 }
 
 export interface FakeHubOptions {
-  /** Answer `hub/info` like hub-server. Off behaves like hub-lite. */
+  /** Answer `hub/info` like hub-server. Off behaves like a server with no such API. */
   info?: boolean
-  /** Rejects connections with this reason instead of accepting them. */
+  /** Claims this hub key in `hub/info`: without its private key the proof can't hold */
+  claimKey?: string
+  /** Answers `hub/info` without a proof, like a hub from before auth v2 */
+  noProof?: boolean
+  /** Rejects keyed connections with this reason instead of accepting them. */
   refuse?: (connection: { version: string; key?: string }) => string | undefined
 }
 
@@ -28,6 +32,11 @@ export class FakeHub {
   readonly channel = new Channel<FakeConnection>()
   readonly connections: FakeConnection[] = []
   infoCalls = 0
+  /** Challenges handed out and not used yet */
+  private nonces = new Set<string>()
+  private nextNonce = 0
+  /** Every set of headers a connection brought, also refused ones, as a hub that keeps them would */
+  received: Record<string, string | undefined>[] = []
   describes: any[] = []
   data: any[] = []
   /** Paths granted per caller key, for `hub/grant/check` */
@@ -38,9 +47,13 @@ export class FakeHub {
   server?: Server<any>
   constructor(options: FakeHubOptions = {}) {
     if (options.info !== false) {
-      this.channel.post('hub/info', () => {
+      this.channel.post('hub/info', ({ body }) => {
         this.infoCalls += 1
-        return { key: this.key.publicKey, protocol: 1, pro: true, mode: 'default-allow' }
+        const key = options.claimKey ?? this.key.publicKey
+        const challenge = `nonce-${this.nextNonce++}`
+        this.nonces.add(challenge)
+        const proof = options.noProof || !body?.nonce ? {} : { proof: this.key.sign(`hubinfo1:${key}:${body.nonce}`) }
+        return { key, protocol: 2, pro: true, mode: 'default-allow', challenge, ...proof }
       })
     }
     this.channel
@@ -82,15 +95,18 @@ export class FakeHub {
     const hub = this
     return this.channel.listen(0, {
       state(headers): FakeConnection {
+        if (headers['auth'] || headers['device']) hub.received.push({ ...headers })
         const version = headers['v'] ?? '0'
         const key = headers['auth'] ? hub.verify(headers['auth'], version) : undefined
-        const reason = hub.refuse?.({ version, key })
+        // Like hub-server, anonymous connections stay open for `hub/info`
+        const reason = key ? hub.refuse?.({ version, key }) : undefined
         if (reason) throw reason
         return { version, key, device: headers['device'], sender: undefined as any, updates: [], closed: false }
       },
       onConnect(connection) {
         connection.state.sender = connection.sender
-        hub.connections.push(connection.state)
+        // An anonymous connection only asks `hub/info`
+        if (connection.state.key) hub.connections.push(connection.state)
       },
       onDisconnect(connection) {
         connection.state.closed = true
@@ -116,12 +132,14 @@ export class FakeHub {
     return connection.device ? readCertificate(connection.device) : undefined
   }
   private verify(token: string, version: string): string {
-    const [prefix, key, signature, expiry] = token.split('.')
+    const [prefix, key, signature, expiry, nonce] = token.split('.')
     if (prefix !== 'key' || !key || !signature || !expiry) throw 'invalid key'
     let data: string
     if (version === '0') data = expiry
-    else if (version === '1') data = `hub1:${this.key.publicKey}:${expiry}`
-    else throw 'unsupported version'
+    else if (version === '1') {
+      if (!nonce || !this.nonces.delete(nonce)) throw 'invalid nonce'
+      data = `hub1:${this.key.publicKey}:${nonce}:${expiry}`
+    } else throw 'unsupported version'
     const publicKey = createPublicKey({ key: Buffer.from(key, 'base64'), format: 'der', type: 'spki' })
     if (!verify(null, Buffer.from(data), publicKey, Buffer.from(signature, 'base64'))) throw 'invalid signature'
     return key

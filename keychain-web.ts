@@ -12,13 +12,13 @@ type RuntimeWithBuffer = typeof globalThis & {
 
 /**
  * Auth token for the hub connection, valid for `expires` seconds.
- * With `hubKey` the token is bound to that hub (v1), otherwise it is a v0 token.
+ * With `hubKey` and its one-time `nonce` it is a v1 token, otherwise a v0 token.
  */
-export async function sign(expires: number = 60, hubKey?: string) {
+export async function sign(expires: number = 30, hubKey?: string, nonce?: string) {
   const pub = await getServicePublicKey()
   const expiry = `${Math.round(new Date().getTime() / 1000) + expires}`
-  const signature = await signChallenge(hubKey ? `hub1:${hubKey}:${expiry}` : expiry)
-  return `key.${pub}.${signature}.${expiry}`
+  const signature = await signChallenge(hubKey ? `hub1:${hubKey}:${nonce}:${expiry}` : expiry)
+  return hubKey ? `key.${pub}.${signature}.${expiry}.${nonce}` : `key.${pub}.${signature}.${expiry}`
 }
 
 /** Sign arbitrary challenge data with existing service identity. */

@@ -22,7 +22,7 @@ class Pins implements HubKeyStore {
 }
 
 function identity(hubKeys: HubKeyStore = new Pins()): ServiceIdentity {
-  return { sign: async key => authToken(serviceKey, Math.round(Date.now() / 1000) + 60, key), hubKeys }
+  return { sign: async (key, nonce) => authToken(serviceKey, Math.round(Date.now() / 1000) + 30, key, nonce), hubKeys }
 }
 
 let hubs: FakeHub[] = []
@@ -46,40 +46,48 @@ function startService(service: MultiplatformService) {
 }
 
 describe('hub key pinning', () => {
-  test('learns the hub key on a v0 connection and reconnects with v1', async () => {
+  test('pins the key the hub proved and connects with v1 at once', async () => {
     const { hub, port } = startHub()
     const pins = new Pins()
     const service = startService(new MultiplatformService(identity(pins), { address: port }))
     await waitFor(() => hub.open.some(c => c.version === '1' && c.updates.length > 0))
-    expect(hub.infoCalls).toBe(1)
-    expect(hub.connections[0]!.version).toBe('0')
-    // The v0 connection switches before registering its services
-    expect(hub.connections[0]!.updates).toEqual([])
-    expect(hub.open.map(c => c.version)).toEqual(['1'])
-    expect(hub.open[0]!.key).toBe(serviceKey.publicKey)
+    expect(hub.connections.map(c => c.version)).toEqual(['1'])
     expect(pins.keys).toEqual({ [`ws://localhost:${port}`]: hubKey })
     expect(service.hubKey).toBe(hubKey)
     expect(service.connectedVersion).toBe('1')
   })
 
-  test('connects with v1 at once when the key is pinned', async () => {
+  test('asks for a challenge before every connection', async () => {
     const { hub, port } = startHub()
     const pins = new Pins()
     pins.keys[`ws://localhost:${port}`] = hubKey
     startService(new MultiplatformService(identity(pins), { address: port }))
     await waitFor(() => hub.open.some(c => c.updates.length > 0))
     expect(hub.connections.map(c => c.version)).toEqual(['1'])
-    expect(hub.infoCalls).toBe(0)
+    expect(hub.infoCalls).toBe(1)
+    hub.connections[0]!.sender.stop()
+    await waitFor(() => hub.open.some(c => c.updates.length > 0), 5000)
+    expect(hub.infoCalls).toBe(2)
+    const tokens = hub.received.map(headers => headers.auth)
+    expect(new Set(tokens).size).toBe(tokens.length)
   })
 
-  test('reports a refused v0 connection too', async () => {
+  test('a refused challenge is asked for again before it counts as refused', async () => {
+    let refusals = 1
+    const { hub, port } = startHub({ refuse: () => (refusals-- > 0 ? 'invalid nonce' : undefined) })
+    const errors: HubRefusedError[] = []
+    startService(new MultiplatformService(identity(), { address: port, onError: error => errors.push(error) }))
+    await waitFor(() => hub.open.some(c => c.updates.length > 0), 5000)
+    expect(errors).toEqual([])
+  })
+
+  test('reports a connection refused twice', async () => {
     const { hub, port } = startHub({ refuse: () => 'key revoked' })
     const errors: HubRefusedError[] = []
     const service = new MultiplatformService(identity(), { address: port, onError: error => errors.push(error) })
     startService(service)
-    await waitFor(() => errors.length === 1)
-    expect(errors[0]!.hubKey).toBeUndefined()
-    expect(service.connectedVersion).toBe('0')
+    await waitFor(() => errors.length === 1, 5000)
+    expect(errors[0]!.hubKey).toBe(hubKey)
     expect(hub.connections).toEqual([])
   })
 
@@ -90,46 +98,66 @@ describe('hub key pinning', () => {
     expect(hub.connections.map(c => c.version)).toEqual(['1'])
   })
 
-  test('stays on v0 with a hub that has no hub/info', async () => {
+  test('a plain sign function signs v1 too', async () => {
+    const { hub, port } = startHub()
+    startService(new MultiplatformService(identity().sign, { address: port }))
+    await waitFor(() => hub.open.some(c => c.updates.length > 0))
+    expect(hub.connections.map(c => c.version)).toEqual(['1'])
+  })
+})
+
+describe('no credentials before proof', () => {
+  const nothingSent = async (hub: FakeHub) => {
+    await waitFor(() => hub.infoCalls > 0)
+    await new Promise(r => setTimeout(r, 300))
+    expect(hub.received).toEqual([])
+  }
+  test('a hub with no hub/info gets no credentials and pins nothing', async () => {
     const { hub, port } = startHub({ info: false })
     const pins = new Pins()
     const service = startService(new MultiplatformService(identity(pins), { address: port }))
-    await waitFor(() => hub.open.some(c => c.updates.length > 0))
-    expect(hub.connections.map(c => c.version)).toEqual(['0'])
+    await new Promise(r => setTimeout(r, 400))
+    expect(hub.received).toEqual([])
     expect(pins.keys).toEqual({})
     expect(service.hubKey).toBeUndefined()
   })
-
-  test('a plain sign function keeps v0', async () => {
-    const { hub, port } = startHub()
-    startService(new MultiplatformService(() => identity().sign(), { address: port }))
-    await waitFor(() => hub.open.some(c => c.updates.length > 0))
-    expect(hub.connections.map(c => c.version)).toEqual(['0'])
-    expect(hub.infoCalls).toBe(0)
+  test('a hub answering without a proof gets no credentials and pins nothing', async () => {
+    const { hub, port } = startHub({ noProof: true })
+    const pins = new Pins()
+    startService(new MultiplatformService(identity(pins), { address: port }))
+    await nothingSent(hub)
+    expect(pins.keys).toEqual({})
   })
-
-  test('does not fall back to v0 when the pinned key is refused', async () => {
+  test('a hub claiming another hub key without proof is not pinned and gets nothing', async () => {
+    const claimed = vectors.keys.device.publicKey
+    const { hub, port } = startHub({ claimKey: claimed })
+    const pins = new Pins()
+    const service = startService(new MultiplatformService(identity(pins), { address: port }))
+    await nothingSent(hub)
+    expect(pins.keys).toEqual({})
+    expect(service.hubKey).toBeUndefined()
+  })
+  test('another key at a pinned address is reported, never pinned, and gets nothing', async () => {
     const { hub, port } = startHub()
     const pins = new Pins()
-    // Another server's key: the hub refuses the token
-    pins.keys[`ws://localhost:${port}`] = vectors.keys.device.publicKey
+    const pinned = vectors.keys.device.publicKey
+    pins.keys[`ws://localhost:${port}`] = pinned
     const errors: HubRefusedError[] = []
     const service = new MultiplatformService(identity(pins), { address: port, onError: error => errors.push(error) })
     startService(service)
     // Sent before the refusal: fails instead of waiting forever
     const waiting = service.send('hub/info')
     await expect(waiting).rejects.toBeInstanceOf(HubRefusedError)
+    expect(hub.received).toEqual([])
     expect(hub.connections).toEqual([])
-    expect(service.connectedVersion).toBe('1')
+    expect(pins.keys[`ws://localhost:${port}`]).toBe(pinned)
     expect(errors).toHaveLength(1)
     expect(errors[0]).toBe(service.refusedError!)
-    expect(errors[0]!.hubKey).toBe(vectors.keys.device.publicKey)
-    expect(errors[0]!.message).toContain(vectors.keys.device.publicKey)
+    expect(errors[0]!.hubKey).toBe(pinned)
+    expect(errors[0]!.message).toContain(pinned)
     // Sent after the refusal: fails at once
     await expect(service.send('hub/info')).rejects.toBe(service.refusedError!)
     expect(() => service.values('hub/info')).toThrow(HubRefusedError)
-    await new Promise(r => setTimeout(r, 300))
-    expect(hub.connections).toEqual([])
 
     await service.forgetHubKey()
     expect(pins.keys).toEqual({})
@@ -138,7 +166,29 @@ describe('hub key pinning', () => {
     expect(service.refusedError).toBeUndefined()
     expect(await service.send('hub/info')).toMatchObject({ key: hubKey })
   })
+})
 
+describe('plain ws://', () => {
+  test('a public address is refused before anything is dialed', async () => {
+    const errors: HubRefusedError[] = []
+    const service = new MultiplatformService(identity(), { address: 'ws://8.8.8.8:1997', onError: error => errors.push(error) })
+    services.push(service)
+    service.start()
+    expect(errors).toHaveLength(1)
+    expect(errors[0]!.message).toContain('unencrypted')
+    expect(service.sender).toBeUndefined()
+    await expect(service.send('hub/info')).rejects.toBe(errors[0]!)
+  })
+  test('allowPlaintext is the way out for a private network', () => {
+    const service = new MultiplatformService(identity(), { address: 'ws://hub.invalid:1', allowPlaintext: true })
+    services.push(service)
+    service.start()
+    expect(service.refusedError).toBeUndefined()
+    expect(service.sender).toBeDefined()
+  })
+})
+
+describe('answers', () => {
   test('answers requests on the v1 connection', async () => {
     const { hub, port } = startHub()
     startService(new MultiplatformService(identity(), { address: port }))

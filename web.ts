@@ -9,6 +9,6 @@ import { hubKeys, sign } from './keychain-web'
 
 export class Service extends MultiplatformService {
   constructor(options?: ServiceOptions) {
-    super({ sign: hubKey => sign(60, hubKey), hubKeys }, options)
+    super({ sign: (hubKey, nonce) => sign(30, hubKey, nonce), hubKeys }, options)
   }
 }

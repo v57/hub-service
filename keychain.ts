@@ -28,9 +28,9 @@ export class ServiceKey {
       this.hubKeys = HubKeyFile.beside(source)
     }
   }
-  /** Auth token for the hub connection, valid for `expires` seconds; bound to `hubKey` (v1) when given. */
-  async sign(expires: number = 60, hubKey?: string): Promise<string> {
-    return authToken(await this.load(), Math.round(Date.now() / 1000) + expires, hubKey)
+  /** Auth token for the hub connection, valid for `expires` seconds; for `hubKey` and its `nonce` (v1) when given. */
+  async sign(expires: number = 30, hubKey?: string, nonce?: string): Promise<string> {
+    return authToken(await this.load(), Math.round(Date.now() / 1000) + expires, hubKey, nonce)
   }
   /** Signs arbitrary challenge data with this key. */
   async signChallenge(challenge: string): Promise<string> {
@@ -118,10 +118,10 @@ export const defaultKey = new ServiceKey()
 
 /**
  * Auth token for the hub connection, valid for `expires` seconds.
- * With `hubKey` the token is bound to that hub (v1), otherwise it is a v0 token.
+ * With `hubKey` and its one-time `nonce` it is a v1 token, otherwise a v0 token.
  */
-export function sign(expires: number = 60, hubKey?: string) {
-  return defaultKey.sign(expires, hubKey)
+export function sign(expires: number = 30, hubKey?: string, nonce?: string) {
+  return defaultKey.sign(expires, hubKey, nonce)
 }
 
 /** Sign arbitrary challenge data with existing service identity. */

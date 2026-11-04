@@ -29,14 +29,15 @@ export class KeyFile {
   }
 }
 
-/** The string an `auth` token signs: `<expiry>` for v0, `hub1:<hub key>:<expiry>` for v1. */
-export function authSignedData(expiry: number, hubKey?: string): string {
-  return hubKey ? `hub1:${hubKey}:${expiry}` : `${expiry}`
+/** The string an `auth` token signs: `hub1:<hub key>:<nonce>:<expiry>` for v1, `<expiry>` for v0. */
+export function authSignedData(expiry: number, hubKey?: string, nonce?: string): string {
+  return hubKey ? `hub1:${hubKey}:${nonce}:${expiry}` : `${expiry}`
 }
 
-/** `key.<service SPKI>.<signature>.<expiry>` */
-export function authToken(key: KeyFile, expiry: number, hubKey?: string): string {
-  return `key.${key.publicKey}.${key.sign(authSignedData(expiry, hubKey))}.${expiry}`
+/** `key.<service SPKI>.<signature>.<expiry>`, then `.<nonce>` on a v1 token */
+export function authToken(key: KeyFile, expiry: number, hubKey?: string, nonce?: string): string {
+  const token = `key.${key.publicKey}.${key.sign(authSignedData(expiry, hubKey, nonce))}.${expiry}`
+  return hubKey ? `${token}.${nonce}` : token
 }
 
 /** First 32 lowercase hex characters of SHA-256 of the device SPKI DER bytes. */

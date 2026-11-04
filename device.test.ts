@@ -155,7 +155,7 @@ describe('device header', () => {
     const port = hub.start()
     service = new MultiplatformService(
       {
-        sign: async hubKey => authToken(serviceKey, Math.round(Date.now() / 1000) + 60, hubKey),
+        sign: async (hubKey, nonce) => authToken(serviceKey, Math.round(Date.now() / 1000) + 30, hubKey, nonce),
         certificate: () => certificates.header(),
       },
       { address: port },
@@ -163,7 +163,7 @@ describe('device header', () => {
     service.start()
     await waitFor(() => hub!.open.some(c => c.version === '1' && c.updates.length > 0))
     // The v0 connection that learns the hub key carries the certificate too
-    expect(hub.connections[0]!.version).toBe('0')
+    expect(hub.connections[0]!.version).toBe('1')
     expect(hub.certificate(hub.connections[0]!)!.service).toBe(serviceKey.publicKey)
     const connection = hub.open[0]!
     const fields = hub.certificate(connection)!

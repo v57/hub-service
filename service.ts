@@ -3,6 +3,7 @@ import { Channel, type Sender } from 'channel/client'
 import { NetworkPublisher, type NetworkShare, type NetworkPolicy } from './network'
 import type { DeviceData, DeviceDescription } from './device-api'
 import { HubError } from './errors'
+import { hubTransport, makeClientNonce, verifyHubProof, type HubProof } from './hub-proof'
 import {
   RateLimiter,
   ServiceRequest,
@@ -51,8 +52,8 @@ export interface HubKeyStore {
 
 /** What a service signs its connection with. */
 export interface ServiceIdentity {
-  /** `auth` header value; bound to `hubKey` (v1) when one is given. */
-  sign(hubKey?: string): Promise<string>
+  /** `auth` header value for this hub and its one-time challenge (v1). */
+  sign(hubKey: string, nonce: string): Promise<string>
   /** Where learned hub keys are pinned. Without it they are pinned in memory only. */
   hubKeys?: HubKeyStore
   /** `device` header value (service certificate) for a v1 connection, if this service runs in device mode. */
@@ -76,12 +77,10 @@ export class MultiplatformService {
   settings: Record<string, ApiSettings> = {}
   profile?: Profile
   identity: ServiceIdentity
-  /** Signs v1 tokens. False for a plain sign function, which only makes v0 tokens. */
-  readonly supportsV1: boolean
   /** The pinned key of the hub at `address`, once known. */
   hubKey?: string
-  /** Protocol version of the current or last connection. */
-  connectedVersion?: '0' | '1'
+  /** Protocol version of the current or last connection: nothing else than `1` is ever sent. */
+  connectedVersion?: '1'
   /**
    * Set when the hub refused the connection. The channel client stops reconnecting then, so the service stays
    * disconnected until `forgetHubKey()`; sends fail with this error instead of waiting.
@@ -104,6 +103,12 @@ export class MultiplatformService {
   /** Set by `stop()`, so the closing connection isn't taken for a refusal */
   private isStopped = false
   private hubKeyLoaded = false
+  /** Plain `ws://` beyond loopback, the overlay and the LAN, see `ServiceOptions.allowPlaintext` */
+  private readonly allowsPlaintext: boolean
+  /** Asked again at once before a refused connection counts: its challenge may have gone with a restart */
+  private retriedRefusal = false
+  /** The hub answered with another key than the pinned one, which no retry changes */
+  private keyMismatch = false
   private readonly initialHubKey?: string
   private readonly memoryHubKeys = new MemoryHubKeys()
   /** Groups whose members may act for end users (`context.user`), see `ServiceOptions.delegates` */
@@ -119,9 +124,9 @@ export class MultiplatformService {
   private readyState: boolean
   private shuttingDown = false
   private idle = new Set<() => void>()
-  constructor(sign: (() => Promise<string>) | ServiceIdentity, options?: ServiceOptions) {
-    this.supportsV1 = typeof sign !== 'function'
-    this.identity = typeof sign === 'function' ? { sign: () => sign() } : sign
+  constructor(sign: ServiceIdentity['sign'] | ServiceIdentity, options?: ServiceOptions) {
+    this.identity = typeof sign === 'function' ? { sign } : sign
+    this.allowsPlaintext = options?.allowPlaintext ?? globalThis.Bun?.env?.HUB_ALLOW_PLAINTEXT === '1'
     this.initialHubKey = options?.hubKey
     this.reporter = options?.reporter ?? false
     this.onError = options?.onError
@@ -141,6 +146,11 @@ export class MultiplatformService {
   start(): this {
     this.isStopped = false
     this.shuttingDown = false
+    this.keyMismatch = false
+    if (hubTransport(this.address) === 'refused' && !this.allowsPlaintext) {
+      this.refused(new HubRefusedError(this.hubAddress, undefined, `${this.hubAddress} would carry this service's key unencrypted. Use wss://, or set allowPlaintext (HUB_ALLOW_PLAINTEXT=1) for a private network.`))
+      return this
+    }
     const services: ServiceHeader[] = []
     for (const path of Object.keys(this.channel.postApi.storage)) {
       const settings = this.settings[path] ?? {}
@@ -163,10 +173,10 @@ export class MultiplatformService {
     const apps = this.apps
     const getProfile = () => this.profile
     const onConnected = (sender: Sender) => this.onConnected(sender)
-    const learnHubKey = (sender: Sender) => this.learnHubKey(sender)
     const opened = () => {
       this.isOpen = true
       this.refusedError = undefined
+      this.retriedRefusal = false
       this.isDeviceReporter = undefined
     }
     const reporter = this.reporter
@@ -176,8 +186,6 @@ export class MultiplatformService {
       headers: () => this.headers(),
       async onConnect(sender) {
         opened()
-        // A newly learned hub key takes effect on the next connect
-        if (await learnHubKey(sender)) return
         try {
           const profile = getProfile()
           if (profile) await sender.send('hub/profile/update', profile)
@@ -195,8 +203,8 @@ export class MultiplatformService {
     return this
   }
   /**
-   * The channel client stops for good when the hub refuses the upgrade.
-   * A refused v1 connect means the hub key changed or another server answers; it is reported, never retried as v0.
+   * The channel client stops for good when the hub refuses the upgrade. A challenge can be gone by then (the hub
+   * restarted, or its nonce store turned over), so one refusal asks for a new one at once; a second is reported.
    */
   private watchRefusal() {
     const ws = this.sender?.ws
@@ -208,7 +216,13 @@ export class MultiplatformService {
       onclose?.()
       // Channel sets isRunning to false when the upgrade is answered without a WebSocket
       if (wasOpen || ws.isRunning || this.isStopped) return
-      this.refused(new HubRefusedError(this.hubAddress, this.connectedVersion === '1' ? this.hubKey : undefined))
+      if (!this.retriedRefusal && !this.keyMismatch) {
+        this.retriedRefusal = true
+        // The channel client reconnects after this callback now that it runs again
+        ws.isRunning = true
+        return
+      }
+      this.refused(new HubRefusedError(this.hubAddress, this.hubKey))
     }
   }
   /** Disconnects from the hub and stops reconnecting; sends that are waiting fail. `start()` connects again. */
@@ -515,14 +529,32 @@ export class MultiplatformService {
     return normalizeHubAddress(this.address)
   }
 
-  /** Connection headers, re-evaluated on every connect. */
+  /**
+   * Connection headers, re-evaluated on every connect (protocol.md section 2): asks the hub on an anonymous connection
+   * for a challenge, takes it only with a proof of the key it claims, and signs for that challenge alone. Waits while
+   * the hub doesn't answer. Credentials go only to a hub that proved the pinned key, and a v0 token never.
+   */
   async headers(): Promise<Record<string, string>> {
-    const hubKey = this.supportsV1 ? await this.pinnedHubKey() : undefined
-    this.connectedVersion = hubKey ? '1' : '0'
-    const headers: Record<string, string> = hubKey
-      ? { auth: await this.identity.sign(hubKey), v: '1' }
-      : { auth: await this.identity.sign(), v: '0' }
-    // The hub accepts a certificate on v0 and v1 connects alike
+    const pinned = await this.pinnedHubKey()
+    let delay = 500
+    while (!this.isStopped) {
+      const info = await this.provenHubInfo()
+      if (info) {
+        if (pinned && info.key !== pinned) return this.stopOnKeyMismatch()
+        return this.signedHeaders(info)
+      }
+      await new Promise(resolve => setTimeout(resolve, delay))
+      delay = Math.min(delay * 2, 5000)
+      // `forgetHubKey()` while waiting
+      if (this.keyMismatch) return {}
+    }
+    return {}
+  }
+
+  private async signedHeaders(info: HubProof): Promise<Record<string, string>> {
+    if (!this.hubKey) await this.pin(info.key)
+    this.connectedVersion = '1'
+    const headers: Record<string, string> = { auth: await this.identity.sign(info.key, info.challenge), v: '1' }
     try {
       const device = await this.identity.certificate?.()
       if (device) headers.device = device
@@ -532,10 +564,44 @@ export class MultiplatformService {
     return headers
   }
 
-  /** Clears the pinned hub key, for when the hub's key changed on purpose. The next connect uses v0 and learns it again. */
+  private async pin(key: string) {
+    this.hubKey = key
+    this.hubKeyLoaded = true
+    try {
+      await this.hubKeyStore.set(this.hubAddress, key)
+    } catch (error) {
+      console.error('Failed to pin the hub key:', error)
+    }
+  }
+
+  /** Stops the client: the channel client closes the anonymous socket this returns no headers for, and it counts as refused */
+  private stopOnKeyMismatch(): Record<string, string> {
+    this.keyMismatch = true
+    const ws = this.sender?.ws
+    if (ws) ws.isRunning = false
+    return {}
+  }
+
+  /** `hub/info` on a connection of its own, without credentials. Undefined unless it proves its key. */
+  private async provenHubInfo(): Promise<HubProof | undefined> {
+    const nonce = makeClientNonce()
+    const probe = new Channel().connect(this.address) as Sender & { stop(): void }
+    try {
+      const info = await probe.send('hub/info', { nonce }, { timeout: 5 })
+      return (await verifyHubProof(info, nonce)) ? info : undefined
+    } catch {
+      return undefined
+    } finally {
+      probe.stop()
+    }
+  }
+
+  /** Clears the pinned hub key, for when the hub's key changed on purpose. The next connect pins what the hub proves. */
   async forgetHubKey(): Promise<void> {
     this.hubKey = undefined
     this.hubKeyLoaded = true
+    this.keyMismatch = false
+    this.retriedRefusal = false
     await this.hubKeyStore.set(this.hubAddress, undefined)
     const ws = this.sender?.ws
     if (this.refusedError && ws && !ws.isRunning) {
@@ -562,30 +628,6 @@ export class MultiplatformService {
     return this.hubKey
   }
 
-  /**
-   * On a v0 connection, asks the hub for its key and pins it.
-   * Returns true when it reconnects to switch to v1. Hubs without `hub/info` (hub-lite) stay on v0.
-   */
-  private async learnHubKey(sender: Sender): Promise<boolean> {
-    if (!this.supportsV1 || this.connectedVersion !== '0') return false
-    let info: HubInfo
-    try {
-      info = await sender.send('hub/info')
-    } catch {
-      return false
-    }
-    if (typeof info?.key !== 'string' || !info.key) return false
-    this.hubKey = info.key
-    this.hubKeyLoaded = true
-    try {
-      await this.hubKeyStore.set(this.hubAddress, info.key)
-    } catch (error) {
-      console.error('Failed to pin the hub key:', error)
-    }
-    this.reconnect()
-    return true
-  }
-
   /** Drops the current connection; the channel client reconnects with fresh headers. */
   protected reconnect() {
     this.sender?.ws?.ws?.close()
@@ -593,8 +635,8 @@ export class MultiplatformService {
 
   /** Fails with `refusedError` when the hub refused the connection, instead of waiting for a reconnect that never comes. */
   send(path: string, body?: any, options?: SendOptions): Promise<any> {
-    if (!this.sender) throw 'Service not started'
     if (this.refusedError) return Promise.reject(this.refusedError)
+    if (!this.sender) throw 'Service not started'
     const response = this.sender.send(path, body, options)
     let reject!: (error: Error) => void
     const refused = new Promise<never>((_, r) => (reject = r))
@@ -602,8 +644,8 @@ export class MultiplatformService {
     return Promise.race([response, refused]).finally(() => this.waitingSends.delete(reject))
   }
   values(path: string, body?: any, options?: SendOptions) {
-    if (!this.sender) throw 'Service not started'
     if (this.refusedError) throw this.refusedError
+    if (!this.sender) throw 'Service not started'
     return this.sender.values(path, body, options)
   }
   private addSettings(path: string, settings: ApiSettings<any> | undefined) {
@@ -792,8 +834,13 @@ export interface ServiceOptions {
   address?: string | number
   name?: string
   icon?: Icon
-  /** The hub's key, if known up front (from an invitation or config). Otherwise learned through `hub/info`. */
+  /** The hub's key, if known up front (from an invitation or config). Otherwise pinned once `hub/info` proves it. */
   hubKey?: string
+  /**
+   * Allow `ws://` to an address beyond loopback, the overlay and the LAN, where this key would travel unencrypted. For
+   * private networks the SDK can't recognize, such as a container's `ws://hub:1997`. Also `HUB_ALLOW_PLAINTEXT=1`.
+   */
+  allowPlaintext?: boolean
   /**
    * Ask for the reporter role of this service's device: the hub takes `describeDevice` and `sendDeviceData`
    * from the first connected reporter of each device. Needs a device certificate.
@@ -905,13 +952,15 @@ export function normalizeHubAddress(address: string | number): string {
 export class HubRefusedError extends Error {
   constructor(
     readonly address: string,
-    /** The pinned key the refused token was bound to; absent for a refused v0 connection */
+    /** The pinned key the refused token was bound to */
     readonly hubKey?: string,
+    reason?: string,
   ) {
     super(
-      hubKey
+      reason ??
+      (hubKey
         ? `hub at ${address} refused the connection signed for its pinned key ${hubKey}; the hub key changed, the service key was revoked, or a different server answers. Call forgetHubKey() if the hub's key changed on purpose.`
-        : `hub at ${address} refused the connection (unknown or revoked key, or not a hub)`,
+        : `hub at ${address} refused the connection (unknown or revoked key, or not a hub)`),
     )
     this.name = 'HubRefusedError'
   }

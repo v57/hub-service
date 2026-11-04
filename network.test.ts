@@ -622,7 +622,7 @@ describe('NetworkService', () => {
     const address = hub.start()
     const serviceKey = new KeyFile(vectors.keys.service.keyFile)
     const service = new NetworkService(
-      { sign: async hubKey => authToken(serviceKey, Math.round(Date.now() / 1000) + 60, hubKey) },
+      { sign: async (hubKey, nonce) => authToken(serviceKey, Math.round(Date.now() / 1000) + 30, hubKey, nonce) },
       async () => 'proof',
       async () => serviceKey.publicKey,
       { address },

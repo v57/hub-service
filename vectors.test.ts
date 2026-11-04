@@ -3,6 +3,7 @@ import { createPublicKey, verify } from 'node:crypto'
 import { join } from 'node:path'
 import { KeyFile, authSignedData, authToken, deviceId, makeCertificate, readCertificate, safetyCode } from './keys'
 import { MultiplatformService } from './service'
+import { hubInfoSignedData, hubTransport, verifyHubProof } from './hub-proof'
 import { vectors } from './testing/fake-hub'
 
 const docsVectors = join(import.meta.dir, '../../Docs/Devices/vectors.json')
@@ -44,11 +45,25 @@ describe('device-layer vectors (Docs/Devices/vectors.json)', () => {
     expect(authToken(service, vectors.auth.expiry)).toBe(v0.header)
   })
 
+  test('hub/info proof', async () => {
+    const { nonce, signedData, proof } = vectors.hubInfo
+    expect(hubInfoSignedData(hub.publicKey, nonce)).toBe(signedData)
+    expect(hub.sign(signedData)).toBe(proof)
+    expect(await verifyHubProof({ key: hub.publicKey, proof, challenge: 'c' }, nonce)).toBeTrue()
+    expect(await verifyHubProof({ key: hub.publicKey, proof, challenge: 'c' }, nonce + 'x')).toBeFalse()
+    expect(await verifyHubProof({ key: service.publicKey, proof, challenge: 'c' }, nonce)).toBeFalse()
+    expect(await verifyHubProof({ key: hub.publicKey, challenge: 'c' }, nonce)).toBeFalse()
+  })
+
+  test('transports', () => {
+    for (const { url, transport } of vectors.transport) expect(`${url} ${hubTransport(url)}`).toBe(`${url} ${transport}`)
+  })
+
   test('v1 auth token', () => {
     const v1 = vectors.auth.v1
-    expect(authSignedData(vectors.auth.expiry, hub.publicKey)).toBe(v1.signedData)
+    expect(authSignedData(vectors.auth.expiry, hub.publicKey, vectors.auth.nonce)).toBe(v1.signedData)
     expect(service.sign(v1.signedData)).toBe(v1.signature)
-    expect(authToken(service, vectors.auth.expiry, hub.publicKey)).toBe(v1.header)
+    expect(authToken(service, vectors.auth.expiry, hub.publicKey, vectors.auth.nonce)).toBe(v1.header)
     expect(verifies(service.publicKey, v1.signedData, v1.signature)).toBeTrue()
     // A v1 token does not verify as v0, so it can't be replayed on another hub or protocol
     expect(verifies(service.publicKey, v1.signedData.replace(hub.publicKey, device.publicKey), v1.signature)).toBeFalse()

@@ -44,7 +44,7 @@ export class Service extends NetworkService {
             service: () => key.publicKey(),
           })
     super(
-      { sign: hubKey => key.sign(60, hubKey), hubKeys: key.hubKeys, certificate: device && (() => device.header()) },
+      { sign: (hubKey, nonce) => key.sign(30, hubKey, nonce), hubKeys: key.hubKeys, certificate: device && (() => device.header()) },
       challenge => key.signChallenge(challenge),
       () => key.publicKey(),
       options,

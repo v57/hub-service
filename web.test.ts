@@ -15,9 +15,10 @@ describe('web keychain', () => {
     const { createPublicKey, verify } = await import('node:crypto')
     const { sign } = await import('./keychain-web')
     const hubKey = 'MCowBQYDK2VwAyEAiojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w='
-    const [, key, signature, expiry] = (await sign(60, hubKey)).split('.')
+    const [, key, signature, expiry, nonce] = (await sign(30, hubKey, 'the-nonce')).split('.')
+    expect(nonce).toBe('the-nonce')
     const publicKey = createPublicKey({ key: Buffer.from(key!, 'base64'), format: 'der', type: 'spki' })
-    expect(verify(null, Buffer.from(`hub1:${hubKey}:${expiry}`), publicKey, Buffer.from(signature!, 'base64'))).toBeTrue()
+    expect(verify(null, Buffer.from(`hub1:${hubKey}:the-nonce:${expiry}`), publicKey, Buffer.from(signature!, 'base64'))).toBeTrue()
     expect(verify(null, Buffer.from(expiry!), publicKey, Buffer.from(signature!, 'base64'))).toBeFalse()
   })
 })

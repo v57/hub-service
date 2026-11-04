@@ -4,7 +4,7 @@ import { MultiplatformService, type ServiceRequest } from './service'
 import { FakeHub, vectors, waitFor } from './testing/fake-hub'
 
 const serviceKey = new KeyFile(vectors.keys.service.keyFile)
-const sign = async (hubKey?: string) => authToken(serviceKey, Math.round(Date.now() / 1000) + 60, hubKey)
+const sign = async (hubKey: string, nonce: string) => authToken(serviceKey, Math.round(Date.now() / 1000) + 30, hubKey, nonce)
 
 let hub: FakeHub
 let service: MultiplatformService
@@ -62,12 +62,6 @@ describe('caller identity', () => {
     const context = { hub: { ...vectors.caller.context.hub, hubKey: vectors.keys.device.publicKey } }
     expect(await connection.sender.send('test/whoami', null, { context })).toBeNull()
     expect(requests[0]).toMatchObject({ context: {} })
-    expect(requests[0]!.caller).toBeUndefined()
-  })
-
-  test('ignores a caller when the hub key is not pinned', async () => {
-    const { connection, requests } = await connect({ info: false })
-    expect(await connection.sender.send('test/whoami', null, { context: vectors.caller.context })).toBeNull()
     expect(requests[0]!.caller).toBeUndefined()
   })
 

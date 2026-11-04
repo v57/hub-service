@@ -27,7 +27,7 @@ async function deviceService(port: number, options: { reporter?: boolean; device
   })
   const service = new MultiplatformService(
     {
-      sign: async hubKey => authToken(key, Math.round(Date.now() / 1000) + 60, hubKey),
+      sign: async (hubKey, nonce) => authToken(key, Math.round(Date.now() / 1000) + 30, hubKey, nonce),
       certificate: options.device === false ? undefined : () => certificates.header(),
     },
     { address: port, reporter: options.reporter ?? true },

@@ -138,7 +138,7 @@ describe('app()', () => {
     const { hub, port } = startHub()
     const key = new KeyFile(vectors.keys.service.keyFile)
     const service = new MultiplatformService(
-      { sign: async hubKey => authToken(key, Math.round(Date.now() / 1000) + 60, hubKey) },
+      { sign: async (hubKey, nonce) => authToken(key, Math.round(Date.now() / 1000) + 30, hubKey, nonce) },
       { address: port },
     )
     const app = new App({ type: 'app', name: 'Test App', path: 'test/ui' }, [])
