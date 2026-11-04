@@ -204,11 +204,17 @@ export class MultiplatformService {
   }
   /**
    * The channel client stops for good when the hub refuses the upgrade. A challenge can be gone by then (the hub
-   * restarted, or its nonce store turned over), so one refusal asks for a new one at once; a second is reported.
+   * restarted, or its nonce store turned over), so one refusal just reconnects with a new one, keeping what's waiting;
+   * a second is reported.
    */
   private watchRefusal() {
     const ws = this.sender?.ws
     if (!ws) return
+    const stop = ws.stop.bind(ws)
+    ws.stop = () => {
+      if (this.isOpen || this.retriedRefusal || this.keyMismatch || this.isStopped) return stop()
+      this.retriedRefusal = true
+    }
     const onclose = ws.onclose
     ws.onclose = () => {
       const wasOpen = this.isOpen
@@ -216,12 +222,6 @@ export class MultiplatformService {
       onclose?.()
       // Channel sets isRunning to false when the upgrade is answered without a WebSocket
       if (wasOpen || ws.isRunning || this.isStopped) return
-      if (!this.retriedRefusal && !this.keyMismatch) {
-        this.retriedRefusal = true
-        // The channel client reconnects after this callback now that it runs again
-        ws.isRunning = true
-        return
-      }
       this.refused(new HubRefusedError(this.hubAddress, this.hubKey))
     }
   }

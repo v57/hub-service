@@ -207,15 +207,20 @@ selected port through `getSharePublication(name)`.
 - The file is ignored by git in this repo.
 - The web runtime stores the key in `localStorage` under `auth` when possible, otherwise in memory.
 
-The signing token includes a short expiration window. Default expiration is 60 seconds.
-
-Tokens are bound to one hub (protocol v1, `Docs/Devices/protocol.md` in the Hub workspace): on its first connection a
-service signs a v0 token, asks `hub/info` for the hub's key, pins it and reconnects with `v: 1`, signing
-`hub1:<hub key>:<expiry>`. Pins live in `hubs.json` beside the `auth` file (`localStorage` key `hubs` on the web), keyed by the dialed
+Tokens work once, for one hub (auth v2, `Docs/Devices/protocol.md` in the Hub workspace). Before each connect the service
+asks `hub/info` on an anonymous connection with a nonce of its own. The hub signs that nonce with its key, and the service
+pins the key only after the proof holds; until one does it keeps waiting and sends nothing. It then connects with `v: 1`,
+signing `hub1:<hub key>:<challenge>:<expiry>` over the one-time challenge from that answer, valid for 30 seconds.
+Pins live in `hubs.json` beside the `auth` file (`localStorage` key `hubs` on the web), keyed by the dialed
 URL (a bare port is `ws://localhost:<port>`; scheme and host lowercased, no trailing slash).
-Hubs without `hub/info` (Hub Lite) stay on v0. If the hub refuses the connection (a changed hub key, a revoked
-service key), the service never falls back to v0: it sets `refusedError` (a `HubRefusedError` naming the pinned
-key), logs it, calls the `onError` option, and fails waiting and new `send` calls with it instead of hanging.
+
+Plain `ws://` is allowed on loopback, the overlay (100.64.0.0/10) and the local network; anything else is refused before
+dialing, since the token and the service's calls would cross the internet in the clear. `allowPlaintext` (or
+`HUB_ALLOW_PLAINTEXT=1`) allows it for a private network such as a container's.
+
+If a hub can't prove the pinned key, or refuses the connection twice (a revoked service key), the service sets
+`refusedError` (a `HubRefusedError` naming the pinned key), logs it, calls the `onError` option, and fails waiting and
+new `send` calls with it instead of hanging. One refusal only asks for a new challenge: it can be gone after a hub restart.
 `forgetHubKey()` clears the pin and reconnects.
 
 ## Devices

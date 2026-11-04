@@ -268,9 +268,11 @@ the shared fixture `testdata/apps/interface.json`.
 
 Any client that speaks [Channel](https://github.com/v57/channel) can act as a service:
 
-1. Open a WebSocket to the hub. Send the headers `auth: key.<publicKey>.<signature>.<expiry>`
-   and `v: 0`. `expiry` is a Unix time in seconds (the SDK uses now + 10 s), `signature` is the Ed25519
-   signature of that string, and both keys are base64.
+1. Open a WebSocket to the hub without headers and call `hub/info` with `{ nonce }` (32 random bytes, base64url). Check
+   `proof`: the Ed25519 signature by `key` over `hubinfo1:<key>:<nonce>`. Pin `key`, or stop if a pinned key differs.
+   Then open a second WebSocket with the headers `auth: key.<publicKey>.<signature>.<expiry>.<challenge>` and `v: 1`.
+   `challenge` comes from the same answer and works once, `expiry` is a Unix time in seconds (at most 60 s ahead; the SDK
+   uses now + 30 s), `signature` is the Ed25519 signature of `hub1:<key>:<challenge>:<expiry>`, and all keys are base64.
 2. Send `hub/profile/update` with `{ name, icon }` (only when either is set).
 3. Send `hub/service/update` with `{ services: [{ path, permissions, limit }], apps: [{ type, name, path, icon?, widget?, web? }] }`.
 4. Answer the post and stream requests for those paths.
