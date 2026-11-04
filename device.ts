@@ -18,8 +18,14 @@ export interface DeviceOptions {
   name?: string
   /** Defaults to the OS: `macos`, `linux`, `windows`, `android` or `other`. */
   platform?: string
-  /** Declared parent device name, for containers and VMs. Defaults to `HUB_DEVICE_PARENT`. */
+  /** A name this device declares for where it runs, which gives it nothing. Defaults to `HUB_DEVICE_PARENT`. */
   parent?: string
+  /**
+   * Ask to attach as a child on every connect (protocol.md section 14): true for an owner to take it, or the parent's
+   * device id. Defaults to `HUB_DEVICE_ATTACH`. A child holds only what the owner gives it, which is what a device
+   * whose key lies in a file should be (a container, a VM, the launcher's services).
+   */
+  attach?: boolean | string
   /** Certificate lifetime in seconds, at most 7 days (the default). */
   lifetime?: number
 }
@@ -38,6 +44,16 @@ export function deviceKeyPath(env: Record<string, string | undefined> = process.
 export function deviceModeEnabled(env: Record<string, string | undefined> = process.env): boolean {
   const value = env.HUB_DEVICE?.toLowerCase()
   return !(value === '0' || value === 'off' || value === 'false' || value === 'no')
+}
+
+/** `HUB_DEVICE_ATTACH`: `1`, `on`, `true` or `yes` to be taken by an owner, a parent's device id, else nothing */
+export function deviceAttach(env: Record<string, string | undefined> = process.env): boolean | string | undefined {
+  const value = env.HUB_DEVICE_ATTACH?.trim()
+  if (!value) return undefined
+  const lower = value.toLowerCase()
+  if (lower === '1' || lower === 'on' || lower === 'true' || lower === 'yes') return true
+  if (lower === '0' || lower === 'off' || lower === 'false' || lower === 'no') return undefined
+  return value
 }
 
 const deviceKeys = new Map<string, Promise<KeyFile>>()
@@ -116,6 +132,7 @@ export class DeviceCertificates {
   readonly name: string
   readonly platform: string
   readonly parent?: string
+  readonly attach?: boolean | string
   readonly lifetime: number
   private readonly service: () => Promise<string>
   private readonly keySource?: DeviceKeySource
@@ -128,6 +145,7 @@ export class DeviceCertificates {
     this.platform = options.platform ?? devicePlatform()
     const parent = options.parent ?? process.env.HUB_DEVICE_PARENT
     if (parent) this.parent = truncateUTF8(parent, 64)
+    this.attach = options.attach ?? deviceAttach()
     this.lifetime = Math.max(60, Math.min(options.lifetime ?? certificateMaxLifetime, certificateMaxLifetime))
     this.service = options.service
     this.keySource = options.key

@@ -9,7 +9,8 @@ export type * from './device-api'
 export * from './network'
 export { publicKey, signChallenge, HubKeyFile, ServiceKey, type ServiceKeySource } from './keychain'
 export { DeviceCertificates, deviceKeyPath, loadDeviceKey, type DeviceOptions, type DeviceKeySource } from './device'
-export { KeyFile, deviceId, safetyCode } from './keys'
+export { KeyFile, attachSignedData, deviceId, safetyCode } from './keys'
+import { attachSignedData } from './keys'
 import { ServiceKey, defaultKey, type ServiceKeySource } from './keychain'
 
 export interface BunServiceOptions extends ServiceOptions {
@@ -44,13 +45,27 @@ export class Service extends NetworkService {
             service: () => key.publicKey(),
           })
     super(
-      { sign: (hubKey, nonce) => key.sign(30, hubKey, nonce), hubKeys: key.hubKeys, certificate: device && (() => device.header()) },
+      { sign: (hubKey, nonce) => key.sign(30, hubKey, nonce), hubKeys: key.hubKeys, certificate: device && (() => device.header()), attach: device?.attach },
       challenge => key.signChallenge(challenge),
       () => key.publicKey(),
       options,
     )
     this.key = key
     this.device = device
+  }
+  /**
+   * Takes a device that asked to attach as a child of this one, signing for it with the device key (protocol.md
+   * section 14). Compare the safety code first: the signature is the approval.
+   */
+  async attachChild(child: { id: string; key: string }, now: number = Math.floor(Date.now() / 1000)) {
+    if (!this.device) throw new Error('no device key')
+    if (!this.hubKey) throw new Error('hub key not pinned')
+    const key = await this.device.key()
+    return this.send('hub/device/attach', {
+      child: child.id,
+      at: now,
+      signature: key.sign(attachSignedData(this.hubKey, key.publicKey, child.key, now)),
+    })
   }
   /**
    * Shuts this service down gracefully (`shutdown`) on SIGTERM or SIGINT, then exits once every service that asked

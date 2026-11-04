@@ -58,6 +58,8 @@ export interface ServiceIdentity {
   hubKeys?: HubKeyStore
   /** `device` header value (service certificate) for a v1 connection, if this service runs in device mode. */
   certificate?(): Promise<string | undefined>
+  /** Ask to attach as a child on connect: true for an owner to take it, or the parent's device id */
+  attach?: boolean | string
 }
 
 /** Result of `hub/info` (hub-server only). */
@@ -181,6 +183,7 @@ export class MultiplatformService {
     }
     const reporter = this.reporter
     const registered = () => this.sendDescription()
+    const attach = this.identity.attach
     const acceptsCalls = () => this.acceptsCalls
     this.sender = this.channel.connect(this.address, {
       headers: () => this.headers(),
@@ -195,6 +198,8 @@ export class MultiplatformService {
         if (!acceptsCalls()) update.draining = true
         await sender.send('hub/service/update', update)
         await registered()
+        // Asked again on every connect, which a hub ignores once answered. A hub before child devices has no such path.
+        if (attach) await sender.send('hub/device/attach/ask', typeof attach === 'string' ? { parent: attach } : {}).catch(() => {})
 
         await onConnected(sender)
       },
@@ -490,6 +495,14 @@ export class MultiplatformService {
   /** Devices waiting for approval (`hub/devices/pending`, owners). Yields `PendingDevice[]`. */
   pendingDevices() {
     return this.values('hub/devices/pending')
+  }
+  /** Where this connection's device stands (`hub/device/request`). Yields `DeviceRequest`. */
+  deviceRequest() {
+    return this.values('hub/device/request')
+  }
+  /** Devices asking to attach: all for an owner, else those naming this device. Yields `AttachRequest[]`. */
+  attachRequests() {
+    return this.values('hub/device/attach/requests')
   }
   /** Latest live data of a device, then updates (`hub/devices/data`). Yields `DeviceData`. */
   deviceData(id: string) {

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DeviceCertificates, certificateRenewal, deviceKeyPath, devicePlatform, loadDeviceKey } from './device'
+import { DeviceCertificates, deviceAttach, certificateRenewal, deviceKeyPath, devicePlatform, loadDeviceKey } from './device'
 import { KeyFile, authToken, deviceId, readCertificate, truncateUTF8 } from './keys'
 import { Service } from './index'
 import { MultiplatformService } from './service'
@@ -171,6 +171,49 @@ describe('device header', () => {
     expect(fields.device).toBe((await loadDeviceKey(keyPath)).publicKey)
     expect(fields.instance).toBe('test')
     expect(deviceId(fields.device)).toBe(await certificates.id())
+  })
+})
+
+describe('asking to attach', () => {
+  const start = (attach: boolean | string | undefined) => {
+    const hub = new FakeHub()
+    const asked: any[] = []
+    hub.channel.post('hub/device/attach/ask', ({ body }) => {
+      asked.push(body)
+      return { id: 'x', status: 'pending' }
+    })
+    const port = hub.start()
+    const service = new MultiplatformService(
+      { sign: async (hubKey, nonce) => authToken(serviceKey, Math.round(Date.now() / 1000) + 30, hubKey, nonce), attach },
+      { address: port },
+    )
+    service.start()
+    return { hub, service, asked }
+  }
+
+  test('on connect, for an owner or naming the parent', async () => {
+    for (const [attach, body] of [[true, {}], ['parent-id', { parent: 'parent-id' }]] as const) {
+      const { hub, service, asked } = start(attach)
+      await waitFor(() => asked.length > 0)
+      expect(asked[0]).toEqual(body)
+      service.sender?.stop()
+      hub.stop()
+    }
+  })
+
+  test('not unless told to', async () => {
+    const { hub, service, asked } = start(undefined)
+    await waitFor(() => hub.open.some(c => c.updates.length > 0))
+    expect(asked).toEqual([])
+    service.sender?.stop()
+    hub.stop()
+  })
+
+  test('HUB_DEVICE_ATTACH', () => {
+    expect(deviceAttach({})).toBeUndefined()
+    for (const value of ['1', 'on', 'TRUE', 'yes']) expect(deviceAttach({ HUB_DEVICE_ATTACH: value })).toBe(true)
+    for (const value of ['0', 'off', 'False', 'no', ' ']) expect(deviceAttach({ HUB_DEVICE_ATTACH: value })).toBeUndefined()
+    expect(deviceAttach({ HUB_DEVICE_ATTACH: 'abc123' })).toBe('abc123')
   })
 })
 

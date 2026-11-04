@@ -229,7 +229,9 @@ A Bun service runs on a device: it signs a 7-day certificate for its service key
 the `device` header, renewing it at connect when less than a day is left. Every service of a
 device shares the key at `~/.hub/device.key` (`/var/lib/hub/device.key` for root on Linux; `HUB_DEVICE_KEY` overrides
 it), created by the first service that needs it. `HUB_DEVICE_NAME` and `HUB_DEVICE_PARENT` set the suggested name and
-declared parent; `HUB_DEVICE=0` or `device: false` turns device mode off. Apps that keep the device key in their own
+a declared parent name, which gives nothing; `device: { attach }` or `HUB_DEVICE_ATTACH` (`1`, or a parent's device id) asks to
+attach as a child, holding only what the owner gives it (Docs/Devices/protocol.md section 14), which is what a container or VM
+should do; `HUB_DEVICE=0` or `device: false` turns device mode off. Apps that keep the device key in their own
 store pass it as `device: { key }` (key file text, a `KeyFile`, or a loader). The Hub Launcher passes its device key and
 the app name (`HUB_INSTANCE`) to the apps it runs.
 

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { createPublicKey, verify } from 'node:crypto'
 import { join } from 'node:path'
-import { KeyFile, authSignedData, authToken, deviceId, makeCertificate, readCertificate, safetyCode } from './keys'
+import { KeyFile, attachSignedData, authSignedData, authToken, deviceId, makeCertificate, readCertificate, safetyCode } from './keys'
 import { MultiplatformService } from './service'
 import { hubInfoSignedData, hubTransport, verifyHubProof } from './hub-proof'
 import { vectors } from './testing/fake-hub'
@@ -21,6 +21,13 @@ describe('device-layer vectors (Docs/Devices/vectors.json)', () => {
     const file = Bun.file(docsVectors)
     if (!(await file.exists())) return // Only checkable next to the Hub docs
     expect(vectors).toEqual(await file.json())
+  })
+
+  test('what a parent signs to attach a child', () => {
+    const { hubKey, parentKey, childKey, at, signedData, signature } = vectors.attach
+    expect(attachSignedData(hubKey, parentKey, childKey, at)).toBe(signedData)
+    expect(device.sign(signedData)).toBe(signature)
+    expect(verifies(parentKey, signedData, signature)).toBe(true)
   })
 
   test('key files come from the seeds', () => {

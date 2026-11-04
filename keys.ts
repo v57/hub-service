@@ -49,6 +49,11 @@ export function deviceId(devicePublicKey: string): string {
  * Six digits shown as `ddd ddd` on both devices during approval. `codeValue` comes from the hub, on
  * `hub/device/request`; `hubKey` is the key this side pinned, so equal codes mean both see the same hub.
  */
+/** What a parent device signs to take a child (protocol.md section 14). */
+export function attachSignedData(hubKey: string, parentKey: string, childKey: string, at: number): string {
+  return `hubattach1:${hubKey}:${parentKey}:${childKey}:${at}`
+}
+
 export function safetyCode(hubKey: string, devicePublicKey: string, codeValue: string): string {
   const digest = createHash('sha256').update(`hubcode1:${hubKey}:${devicePublicKey}:${codeValue}`).digest('hex')
   const n = parseInt(digest.slice(0, 8), 16) % 1_000_000

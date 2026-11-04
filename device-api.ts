@@ -57,6 +57,26 @@ export interface Device {
   services: { key: string; instance: string; name?: string; online: boolean; paths: string[] }[]
   /** What its safety code covers: for owners and the device's own person */
   codeValue?: string
+  /** The parent's device id, signed by it. `parent` is only a name the device declared. */
+  attachedTo?: string
+  /** Whether linked grants reach this child */
+  linked?: boolean
+}
+
+/** `hub/device/attach/requests`: a device asking to attach */
+export interface AttachRequest {
+  id: string
+  key: string
+  name: string
+  platform?: string
+  approved: boolean
+  /** Recompute it with `safetyCode` from `codeValue` and your pinned hub key before comparing */
+  safetyCode: string
+  codeValue: string
+  /** The parent it named. Without one, only an owner can take it. */
+  parent?: string
+  /** ISO 8601 */
+  askedAt: string
 }
 
 export interface PendingDevice {
@@ -78,4 +98,6 @@ export interface DeviceRequest {
   /** What it asks for while pending, its final name once approved */
   name?: string
   codeValue?: string
+  /** Set once a parent signed for it */
+  attachedTo?: string
 }
