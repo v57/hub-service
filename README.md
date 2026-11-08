@@ -7,14 +7,20 @@ Full documentation, including apps and the other 13 languages: [docs](docs/READM
 ## Install
 
 ```sh
-bun add hub-service
+bun add v57/hub-service
 ```
 
 ## Entry Points
 
-- `hub-service` - Bun/server runtime. Persists the private key in a local `auth` file.
-- `hub-service/web` - browser/Web Crypto runtime. Uses `localStorage` when available and falls back to memory.
-- `hub-service/app` - app builder and UI element helpers. This file also patches `Service.prototype.app`, so import it before calling `service.app(...)`.
+| Entry point | Purpose | Runtime | Import |
+|---|---|---|---|
+| [`hub-service`](docs/README.md) | `Service` for servers: post and stream APIs, calling other services, auth v2 with the key in an `auth` file, device certificates, Hub Network shares, [API descriptions](docs/README.md#api-descriptions-and-schemas) (`jsonSchema`, `checkSchema`, `apiList()`), `HubError` | Bun | `import { Service } from 'hub-service'` |
+| [`hub-service/web`](docs/README.md#auth) | The same `Service` for browsers: Web Crypto, the key in `localStorage` (memory when unavailable); no device certificates or network shares, and the schema helpers aren't re-exported | Browsers, Bun | `import { Service } from 'hub-service/web'` |
+| [`hub-service/app`](docs/apps.md) | App builders: `App`, element helpers (`text`, `button`, `cell`, `list`, `files`, `fileOperation`, `stat`, `chart`, ...), `action`, `widget`, `webApp`. Importing it adds `app(...)` to every service class, so import it before calling `service.app(...)` | Bun, browsers | `import { App, button } from 'hub-service/app'` |
+| [`hub-service/testing/fake-hub`](docs/README.md#testing-a-service) | `FakeHub`, `vectors` and `waitFor` for a service's tests: a hub on a free port that checks tokens like hub-server and records what services send | Bun (`bun test`) | `import { FakeHub, vectors, waitFor } from 'hub-service/testing/fake-hub'` |
+
+The package has no `exports` map, so its other files resolve too; Hub's services import `MultiplatformService` from
+`hub-service/service` and `KeyFile`/`authToken` from `hub-service/keys` in tests.
 
 ## Quick Start
 
@@ -110,6 +116,9 @@ Settings:
 - `rateLimit: { limit, window, by?, bucket? }`: calls per caller per window (seconds), or `false`
 - `limit`: calls the hub runs at once on this provider; `public: true`: callable by anyone on `default-deny` hubs
 - `shutdown: 'wait' | 'end'`: what `shutdown()` does with a running call
+- `title`, `description`, `inputSchema`, `outputSchema`, `annotations`: what the path does, for `hub/api/list` and
+  MCP-style tools; `input: jsonSchema(schema)` validates and publishes the schema
+  ([API descriptions](docs/README.md#api-descriptions-and-schemas))
 
 ```ts
 service.post('posts/delete', ({ id }, request) => posts.delete(id, request.signal), {
@@ -156,6 +165,12 @@ milliseconds (10 s) for running posts, then stops; it resolves true when everyth
 `shutdownOnSignals({ timeout })` (Bun) does it on SIGTERM and SIGINT, then exits. The `ready: false` option and
 `setReady(false)` keep the paths registered without taking calls. `health` is
 `{ status, connected, ready, running }`.
+
+### `apiList()`
+
+The hub's APIs this connection may call, with what their services say about them (`hub/api/list`): `ApiDescription[]`
+of `{ path, kind?, title?, description?, inputSchema?, outputSchema?, annotations? }`. A hub from before API
+descriptions fails it with `api not found`.
 
 ### `publicKey()`
 
@@ -248,6 +263,8 @@ they take over. Owners and granted callers read `devices()`, `pendingDevices()` 
 a provider on a given device with `send(path, body, { context: { device: id } })`.
 
 ## Apps
+
+Every builder, live updates, cells, lists and the file elements: [docs/apps.md](docs/apps.md).
 
 Import the side-effect module before using `service.app(...)` (on any service, `MultiplatformService` and the web
 `Service` included):

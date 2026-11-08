@@ -9,10 +9,15 @@ The same SDK exists in 14 languages. This repo (TypeScript, Bun) is the referenc
 same wire contract and is checked against a live hub with [`tests/verify.ts`](../tests/verify.ts).
 
 - [Quick start](#quick-start)
-- [Concepts](#concepts): hub address, post and stream APIs, calling APIs, settings, profile, auth
-- [Apps](#apps): UI that the Hub app renders for your service
+- [Concepts](#concepts): hub address, post and stream APIs, calling APIs, settings, API descriptions, profile, auth
+- [Apps](#apps): UI that the Hub app renders for your service (builders in detail: [apps.md](apps.md))
+- [Testing a service](#testing-a-service)
 - [Wire contract](#wire-contract)
 - [Languages](#languages)
+
+Other pages: [Service features](service-features.md) (authorization, errors, limits, shutdown),
+[API descriptions](api-descriptions.md) (design and the mapping to MCP tools), [Apps](apps.md) (the app SDK).
+The Swift package has its own guide: [HubService](https://github.com/v57/HubService/blob/main/docs/HubService.md).
 
 ## Quick start
 
@@ -107,21 +112,130 @@ end users through a gateway), errors with codes, input validation, per-caller ra
 and graceful shutdown. [Service features](service-features.md) describes them in TypeScript and Swift, the hub APIs
 behind them (`hub/grant/check`, `draining`) and what the other ports need to follow.
 
-### Descriptions and schemas
+### API descriptions and schemas
 
-Each path can carry a `title`, a `description`, an `inputSchema` and an `outputSchema` (JSON schemas) and MCP's
-`annotations`, so people and agents can list a hub's APIs like MCP tools (`hub/api/list`):
+Each path can say what it does, the way an MCP server describes its tools: a `title`, a `description`, an
+`inputSchema` and an `outputSchema` (JSON schemas) and MCP's `annotations`. They go in the same settings as `auth`,
+`permission` and `limit`. The service sends them with its paths in `hub/service/update`; the hub keeps them while the
+service is connected and lists them with `hub/api/list`, filtered by what the caller may call. People read them in
+the Hub app's Services page, and an MCP bridge can turn the list into MCP tools.
+[API descriptions](api-descriptions.md) has the design, the hub's rules and the MCP mapping; the wire contract is
+section 15 of the Hub protocol (`Docs/Devices/protocol.md` in the Hub workspace).
+
+| Setting | What it says |
+|---|---|
+| `title` | A short name, plain text (the hub keeps up to 128 characters) |
+| `description` | What the path does, when to use it and what the caller needs (a permission, a format); plain text, up to 4096 characters |
+| `inputSchema` | JSON schema of the body. Published only: nothing is checked |
+| `outputSchema` | JSON schema of the answer; for a stream, of each value |
+| `annotations` | MCP's hints, passed through: `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint` |
+| `input: jsonSchema(schema)` | Validates the body against `schema` and publishes it as `inputSchema` (unless `inputSchema` is also given, which wins) |
+
+A worked example, a post and a stream of a notes service:
 
 ```ts
-service.post('llm/list', list, {
-  description: 'Models this machine can run, with their sizes.',
-  outputSchema: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' } } } },
-  annotations: { readOnlyHint: true },
-})
+import { Service, jsonSchema, type JSONSchema } from 'hub-service'
+
+interface Note { id: string; text: string; updatedAt: number }
+const notes: Note[] = []
+const waiting = new Set<() => void>()
+const changed = () => { for (const wake of waiting) wake(); waiting.clear() }
+
+// Typed as JSONSchema, so `type: 'object'` checks without `as const`
+const note: JSONSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'string', description: 'Note id' },
+    text: { type: 'string' },
+    updatedAt: { type: 'integer', description: 'Last change, Unix milliseconds' },
+  },
+  required: ['id', 'text', 'updatedAt'],
+}
+const search: JSONSchema = {
+  type: 'object',
+  properties: {
+    query: { type: 'string', minLength: 1, description: 'Text to look for' },
+    limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+  },
+  required: ['query'],
+  additionalProperties: false,
+}
+
+new Service({ name: 'Notes' })
+  .post('notes/search', ({ query, limit = 20 }: { query: string; limit?: number }) =>
+    notes.filter(note => note.text.includes(query)).slice(0, limit), {
+    title: 'Search notes',
+    description: 'Notes whose text contains the query, at most `limit` of them. Fails with invalid_input for an empty query.',
+    input: jsonSchema(search), // checks the body, and publishes `search` as inputSchema
+    outputSchema: { type: 'array', items: note },
+    annotations: { readOnlyHint: true },
+  })
+  .stream('notes/changes', async function* () {
+    while (true) {
+      yield notes
+      await new Promise<void>(resolve => waiting.add(resolve))
+    }
+  }, {
+    title: 'Watch notes',
+    description: 'Every note now, then again after each change. Never ends on its own.',
+    outputSchema: { type: 'array', items: note }, // each value of the stream
+    annotations: { readOnlyHint: true },
+  })
+  .start()
 ```
 
-Publishing a schema validates nothing; `input: jsonSchema(schema)` validates and publishes. See
-[API descriptions](api-descriptions.md).
+A body that doesn't match fails with the code `invalid_input` before the handler runs, with the message
+`$.query: shorter than 1` and the issues in `info.issues` (`[{ path, message }]`). `checkSchema(schema, value)`
+returns the same issues without throwing. The validators check the subset listed in
+[API descriptions](api-descriptions.md#json-schema-subset) (`type`, `properties`, `required`, `additionalProperties`,
+`items`, `enum`, `const`, `anyOf`, the min/max keywords and `pattern`); other keywords are published and ignored. Write
+nested schemas inline, there is no `$ref`.
+
+Any connection reads the descriptions back with `apiList()`, one entry per path and kind, sorted by path:
+
+```ts
+import { Service } from 'hub-service'
+
+const client = new Service().start()
+for (const api of await client.apiList()) {
+  if (api.path.startsWith('notes/')) console.log(api.kind, api.path, '-', api.title, api.annotations)
+}
+// stream notes/changes - Watch notes { readOnlyHint: true }
+// post notes/search - Search notes { readOnlyHint: true }
+```
+
+Each entry is an `ApiDescription`: `{ path, kind?, title?, description?, inputSchema?, outputSchema?, annotations? }`.
+A path whose service described nothing lists as `{ path }` (or `{ path, kind }` when the service said the kind, as
+this SDK always does), and the hub's own `hub/*` paths as `{ path, kind }`. A `default` in a schema is documentation:
+the validator doesn't fill it in, so the handler above sets `limit = 20` itself.
+`client.values('hub/api/list')` is the same list as a stream that sends it again when the hub's APIs change. A hub
+from before descriptions has no `hub/api/list` and fails the call with `api not found`; older hubs also ignore the new
+fields, so describing paths is safe everywhere.
+
+For a service with many paths, keep the descriptions in one file beside the handlers and spread them into the
+settings, as Hub's own services do:
+
+```ts
+// descriptions.ts
+import type { ApiSettings } from 'hub-service'
+import { note, search } from './schemas' // the JSONSchema constants above
+
+export const descriptions: { post: Record<string, ApiSettings>; stream: Record<string, ApiSettings> } = {
+  post: {
+    'notes/search': { title: 'Search notes', description: '...', inputSchema: search, annotations: { readOnlyHint: true } },
+  },
+  stream: {
+    'notes/changes': { title: 'Watch notes', description: '...', outputSchema: { type: 'array', items: note } },
+  },
+}
+
+// api.ts
+service.post('notes/search', searchNotes, { ...descriptions.post['notes/search'], permission: 'notes/read' })
+```
+
+A test that every registered path has a description, and that each description is a sentence, keeps them complete.
+`ApiSettings` and `JSONSchema` are the types to declare them with; a plain object literal widens `type: 'object'` to
+`string`, which `JSONSchema` doesn't accept.
 
 ### Profile
 
@@ -153,7 +267,9 @@ rather than a file.
 ## Apps
 
 A service can ship a small UI that the Hub app renders. You describe it with elements and bind them to a
-`data` dictionary. Buttons and fields call your APIs and write the responses back into `data`.
+`data` dictionary. Buttons and fields call your APIs and write the responses back into `data`. This section is the
+overview; [Apps](apps.md) has every builder of `hub-service/app` with its arguments, live updates, top and bottom
+bars, cells and lists, and the file elements.
 
 ```ts
 import { Service } from 'hub-service'
@@ -202,7 +318,7 @@ new Service({ name: 'Hasher', icon: { symbol: 'number', text: '#' } })
 | `badge(value, { color })` | Small colored label; `up`, `down`, `pending` and other status words pick a color |
 | `link(title, url, { icon })` | Opens a web page in the browser |
 | `divider()` | Line |
-| `textField(value, { placeholder, action })` | Text field. `action` runs on submit |
+| `textField(value, { placeholder, action })` | Text field. `action` runs when the text changes |
 | `button(title, action, { icon, style, confirm })` | Button. `confirm: { title, message, button, destructive }` asks first |
 | `sheet(title, content, { icon })` | Button that opens `content` in a sheet |
 | `slider(value, { defaultValue, min, max, step, action })` | Slider |
@@ -280,6 +396,51 @@ service.app(admin)
 The full protocol, for other SDKs and clients, is in the Hub docs (`Docs/Apps/ui.md`); every element is in
 the shared fixture `testdata/apps/interface.json`.
 
+## Testing a service
+
+`bun test` runs this repo's tests; a hub isn't needed. `hub-server.integration.test.ts` also runs the SDK against a
+real hub-server when a checkout is next to it (`HUB_SERVER_DIR` points elsewhere) and is skipped without one.
+
+A service's own tests can use the fake hub the SDK's tests use, `hub-service/testing/fake-hub`. `FakeHub` listens on a
+free port, answers `hub/info` with a proof like hub-server, checks the service's token and records what it sends;
+`hub.context(caller)` builds the context the hub would forward for a caller. Write the service as a function that adds
+paths to a `MultiplatformService`, so the test needs no key file and no device key:
+
+```ts
+import { afterEach, expect, test } from 'bun:test'
+import { KeyFile, authToken } from 'hub-service/keys'
+import { MultiplatformService } from 'hub-service/service'
+import { FakeHub, vectors, waitFor } from 'hub-service/testing/fake-hub'
+import { serveNotes } from './api' // (service: MultiplatformService) => void, adds notes/search
+
+const key = new KeyFile(vectors.keys.service.keyFile)
+const sign = async (hubKey: string, nonce: string) => authToken(key, Math.round(Date.now() / 1000) + 30, hubKey, nonce)
+
+let hub: FakeHub
+let service: MultiplatformService
+afterEach(() => {
+  service?.stop()
+  hub?.stop()
+})
+
+test('notes/search', async () => {
+  hub = new FakeHub()
+  service = new MultiplatformService({ sign }, { address: hub.start() })
+  serveNotes(service)
+  service.start()
+  await waitFor(() => hub.open.some(c => c.updates.length > 0))
+  const connection = hub.open.find(c => c.updates.length > 0)!
+  const context = hub.context({ key: 'caller-key', owner: true })
+  expect(await connection.sender.send('notes/search', { query: 'milk' }, { context })).toEqual([])
+  expect(connection.updates[0].services.map((s: any) => s.path)).toContain('notes/search')
+})
+```
+
+`FakeHub` options: `noProof` answers like a hub from before auth v2, `claimKey` claims a key it can't prove, `refuse`
+refuses connections; `grants` answers `hub/grant/check`. The Bun `Service` creates a device key in `~/.hub` unless
+`HUB_DEVICE_KEY` points elsewhere or `device: false` is set, so tests that use it should set one of them (this repo's
+`bunfig.toml` preloads `testing/setup.ts`, which does).
+
 ## Wire contract
 
 Any client that speaks [Channel](https://github.com/v57/channel) can act as a service:
@@ -332,7 +493,7 @@ The same echo service in each language:
 ```swift
 import HubService
 
-let client = HubClient(URL(string: "ws://127.0.0.1:1997")!, keyChain: KeyChain(keyChain: "com.example.YourApp"), connect: true)
+let client = HubClient(URL(string: "ws://127.0.0.1:1997")!, keyChain: .keychain("com.example.YourApp"))
 client.service.post("echo/upper") { (value: String) in
   value.uppercased()
 }
