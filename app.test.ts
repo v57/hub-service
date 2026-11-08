@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
+import { LazyState } from 'channel/more'
 import { KeyFile, authToken } from './keys'
 import { MultiplatformService } from './service'
 import { FakeHub, vectors, waitFor } from './testing/fake-hub'
@@ -7,14 +8,19 @@ import {
   WebTokens,
   badge,
   button,
+  cell,
   chart,
   column,
   divider,
+  fileOperation,
+  files,
   gauge,
   grid,
+  hstack,
   image,
   link,
   markdown,
+  progress,
   section,
   series,
   sheet,
@@ -22,6 +28,7 @@ import {
   tab,
   table,
   tabs,
+  spacer,
   text,
   vstack,
   webApp,
@@ -42,6 +49,9 @@ describe('element builders', () => {
     expect(image({ symbol: 'star' })).toEqual({ type: 'image', symbol: 'star' })
     expect(divider()).toEqual({ type: 'divider' })
     expect(markdown('**hi**')).toEqual({ type: 'markdown', value: '**hi**' })
+    expect(cell(undefined, 'Secondary')).toEqual({ type: 'cell', subtitle: 'Secondary' })
+    expect(files('/tmp/demo.txt', undefined, { path: 'a/open' })).toEqual({ type: 'files', value: '/tmp/demo.txt', action: { path: 'a/open' } })
+    expect(fileOperation('png', undefined, { path: 'a/save' })).toEqual({ type: 'fileOperation', format: 'png', action: { path: 'a/save' } })
   })
 
   test('button confirmation and style', () => {
@@ -229,6 +239,26 @@ describe('publishing', () => {
     const payload = await admin.verifyToken(token)
     expect(payload.caller).toBe(vectors.caller.context.hub.caller.key)
     expect(payload.hub).toBe(hub.key.publicKey)
+  })
+
+  test('streams top and bottom bars first, then state updates', async () => {
+    hub = new FakeHub()
+    const port = hub.start()
+    service = new MultiplatformService({ sign }, { address: port })
+    const header = { type: 'app' as const, path: 'test/bars', name: 'Bars' }
+    const top = vstack(['Toolbar', hstack([spacer(), button('Run', { path: 'test/run' })], { spacing: 6 })], { spacing: 10 })
+    const state = new LazyState<AppInterface>(() => ({ body: [progress('$done', { min: 2, max: 5 })], bottom: 'Updated', data: { count: 2 } }))
+    service.app(new App(header, ['Body'], { count: 1 }, state, { top, bottom: 'Initial' })).start()
+    await waitFor(() => hub.open.some(c => c.updates.length > 0))
+    const connection = hub.open.find(c => c.updates.length > 0)!
+
+    const values: AppInterface[] = []
+    for await (const value of connection.sender.values('test/bars')) {
+      values.push(value as AppInterface)
+      if (values.length === 2) break
+    }
+    expect(values[0]).toEqual({ header, body: ['Body'], top, bottom: 'Initial', data: { count: 1 } })
+    expect(values[1]).toEqual({ body: [{ type: 'progress', value: '$done', min: 2, max: 5 }], bottom: 'Updated', data: { count: 2 } })
   })
 })
 
