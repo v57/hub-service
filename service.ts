@@ -14,6 +14,7 @@ import {
   type Requirements,
   type Validator,
 } from './request'
+import { validatorSchema, type ApiAnnotations, type ApiDescription, type JSONSchema } from './schema'
 export { ServiceRequest } from './request'
 type AnyIterator = AsyncIterator<any, void, any> | Promise<AsyncIterator<any, void, any>>
 
@@ -77,6 +78,8 @@ export class MultiplatformService {
   apps: AppHeader[] = []
   group?: string
   settings: Record<string, ApiSettings> = {}
+  /** What `post` and `stream` settings say about each path, per kind, for `hub/service/update` */
+  descriptions: Record<string, { post?: ApiDescriptionFields; stream?: ApiDescriptionFields }> = {}
   profile?: Profile
   identity: ServiceIdentity
   /** The pinned key of the hub at `address`, once known. */
@@ -153,25 +156,7 @@ export class MultiplatformService {
       this.refused(new HubRefusedError(this.hubAddress, undefined, `${this.hubAddress} would carry this service's key unencrypted. Use wss://, or set allowPlaintext (HUB_ALLOW_PLAINTEXT=1) for a private network.`))
       return this
     }
-    const services: ServiceHeader[] = []
-    for (const path of Object.keys(this.channel.postApi.storage)) {
-      const settings = this.settings[path] ?? {}
-      services.push({
-        path,
-        permissions: settings.permissions,
-        limit: settings.limit,
-        public: settings.public || undefined,
-      })
-    }
-    for (const path of Object.keys(this.channel.streamApi.storage)) {
-      const settings = this.settings[path] ?? {}
-      services.push({
-        path,
-        permissions: settings.permissions,
-        limit: settings.limit,
-        public: settings.public || undefined,
-      })
-    }
+    const services = this.serviceHeaders()
     const apps = this.apps
     const getProfile = () => this.profile
     const onConnected = (sender: Sender) => this.onConnected(sender)
@@ -347,7 +332,7 @@ export class MultiplatformService {
    * `HubError` before the handler runs.
    */
   post<Body = any>(path: string, action: (body: Body, request: ServiceRequest) => any | Promise<any>, settings?: ApiSettings<Body>) {
-    this.addSettings(path, settings)
+    this.addSettings(path, settings, 'post')
     const permission = settings?.permission
     const input = settings?.input
     const shutdown = settings?.shutdown ?? 'wait'
@@ -364,7 +349,7 @@ export class MultiplatformService {
   }
   /** Registers an async iterator handler, with the same `settings` as `post` */
   stream<Body = any>(path: string, action: (body: Body, request: ServiceRequest) => AnyIterator, settings?: ApiSettings<Body>) {
-    this.addSettings(path, settings)
+    this.addSettings(path, settings, 'stream')
     const permission = settings?.permission
     const input = settings?.input
     const shutdown = settings?.shutdown ?? 'end'
@@ -661,8 +646,10 @@ export class MultiplatformService {
     if (!this.sender) throw 'Service not started'
     return this.sender.values(path, body, options)
   }
-  private addSettings(path: string, settings: ApiSettings<any> | undefined) {
+  private addSettings(path: string, settings: ApiSettings<any> | undefined, kind: 'post' | 'stream') {
     if (!settings) return
+    const description = describedFields(settings)
+    if (description) (this.descriptions[path] ??= {})[kind] = description
     this.settings[path] = settings
     if (settings.permissions && !settings.permissions.group) {
       if (!this.group) this.group = path.split('/')[0]
@@ -671,6 +658,49 @@ export class MultiplatformService {
   }
 
   protected async onConnected(_sender: Sender): Promise<void> {}
+
+  /**
+   * The `services` of `hub/service/update`: one header per path and kind, with what its settings describe
+   * (protocol.md section 15). Hubs before descriptions ignore `kind` and the description fields.
+   */
+  serviceHeaders(): ServiceHeader[] {
+    const headers: ServiceHeader[] = []
+    const add = (path: string, kind: 'post' | 'stream') => {
+      const settings = this.settings[path] ?? {}
+      headers.push({
+        path,
+        permissions: settings.permissions,
+        limit: settings.limit,
+        public: settings.public || undefined,
+        kind,
+        ...this.descriptions[path]?.[kind],
+      })
+    }
+    for (const path of Object.keys(this.channel.postApi.storage)) add(path, 'post')
+    for (const path of Object.keys(this.channel.streamApi.storage)) add(path, 'stream')
+    return headers
+  }
+  /**
+   * The hub's APIs this service may call, with what their services say about them (`hub/api/list`, protocol.md
+   * section 15). A hub from before descriptions has no such path.
+   */
+  apiList(): Promise<ApiDescription[]> {
+    return this.send('hub/api/list')
+  }
+}
+
+type ApiDescriptionFields = Pick<ApiDescription, 'title' | 'description' | 'inputSchema' | 'outputSchema' | 'annotations'>
+
+/** The description fields of `settings`, or nothing when it describes nothing */
+function describedFields(settings: ApiSettings<any>): ApiDescriptionFields | undefined {
+  const fields: ApiDescriptionFields = {}
+  if (settings.title) fields.title = settings.title
+  if (settings.description) fields.description = settings.description
+  const inputSchema = settings.inputSchema ?? validatorSchema(settings.input)
+  if (inputSchema) fields.inputSchema = inputSchema
+  if (settings.outputSchema) fields.outputSchema = settings.outputSchema
+  if (settings.annotations) fields.annotations = settings.annotations
+  return Object.keys(fields).length ? fields : undefined
 }
 
 /** Bun service with local Hub Network publication support. */
@@ -1014,6 +1044,16 @@ export interface ApiSettings<Body = any> extends Requirements {
   input?: Validator<Body>
   /** On `shutdown()`: `wait` for the call (posts' default) or `end` it at once (streams' default) */
   shutdown?: 'wait' | 'end'
+  /** A short name for people and agents (`hub/api/list`) */
+  title?: string
+  /** What the path does, when to use it and what it needs; plain text (`hub/api/list`, docs/api-descriptions.md) */
+  description?: string
+  /** JSON schema of the body. Published only; `input: jsonSchema(schema)` also validates and publishes it */
+  inputSchema?: JSONSchema
+  /** JSON schema of the answer, or of each value of a stream */
+  outputSchema?: JSONSchema
+  /** MCP's hints: `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint` */
+  annotations?: ApiAnnotations
 }
 export interface ServicePermissions {
   group?: string
@@ -1023,11 +1063,17 @@ export interface ServicePermissions {
   allows?: boolean
 }
 
-interface ServiceHeader {
+export interface ServiceHeader {
   path: string
   permissions?: ServicePermissions
   limit?: number
   public?: boolean
+  kind?: 'post' | 'stream'
+  title?: string
+  description?: string
+  inputSchema?: JSONSchema
+  outputSchema?: JSONSchema
+  annotations?: ApiAnnotations
 }
 
 export interface Profile {

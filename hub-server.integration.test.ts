@@ -57,13 +57,21 @@ describe.skipIf(!available)('against hub-server', () => {
         },
       })
       .post('social/posts/delete', () => 'deleted', { permission: 'social/posts/moderate' })
-      .post('social/posts/like', () => 'liked', { auth: 'key', rateLimit: { limit: 2, window: 60 } })
+      .post('social/posts/like', () => 'liked', {
+        auth: 'key',
+        rateLimit: { limit: 2, window: 60 },
+        title: 'Like',
+        description: 'Likes a post for the caller.',
+        outputSchema: { type: 'string', const: 'liked' },
+        annotations: { idempotentHint: true },
+      })
       .post('social/slow', async () => (await release, 'slow done'))
+      .post('social/feed', () => [], { description: 'The feed once.' })
       .stream('social/feed', async function* (_, request) {
         streamSignal = request.signal
         yield 'first'
         await new Promise((_, reject) => request.signal.addEventListener('abort', () => reject(request.signal.reason)))
-      })
+      }, { description: 'Posts as they come.', outputSchema: { type: 'string' } })
       .stream('social/broken', async function* () {
         yield 1
         throw HubError.notFound('feed gone', { feed: 'x' })
@@ -118,6 +126,19 @@ describe.skipIf(!available)('against hub-server', () => {
     })().catch(error => error)
     expect(values).toEqual([1])
     expect([error.message, error.code, error.info]).toEqual(['feed gone', 'not_found', { feed: 'x' }])
+  })
+
+  test('hub/api/list carries what the service said about its paths', async () => {
+    const { service } = await client()
+    const list = await service.apiList()
+    expect(list.filter(entry => entry.path === 'social/posts/like')).toEqual([
+      { path: 'social/posts/like', kind: 'post', title: 'Like', description: 'Likes a post for the caller.', outputSchema: { type: 'string', const: 'liked' }, annotations: { idempotentHint: true } },
+    ])
+    expect(list.filter(entry => entry.path === 'social/feed')).toEqual([
+      { path: 'social/feed', kind: 'post', description: 'The feed once.' },
+      { path: 'social/feed', kind: 'stream', description: 'Posts as they come.', outputSchema: { type: 'string' } },
+    ])
+    expect(list.find(entry => entry.path === 'social/slow')).toEqual({ path: 'social/slow', kind: 'post' })
   })
 
   test('a caller leaving a stream aborts the handler signal through the hub', async () => {

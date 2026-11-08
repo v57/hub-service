@@ -107,6 +107,22 @@ end users through a gateway), errors with codes, input validation, per-caller ra
 and graceful shutdown. [Service features](service-features.md) describes them in TypeScript and Swift, the hub APIs
 behind them (`hub/grant/check`, `draining`) and what the other ports need to follow.
 
+### Descriptions and schemas
+
+Each path can carry a `title`, a `description`, an `inputSchema` and an `outputSchema` (JSON schemas) and MCP's
+`annotations`, so people and agents can list a hub's APIs like MCP tools (`hub/api/list`):
+
+```ts
+service.post('llm/list', list, {
+  description: 'Models this machine can run, with their sizes.',
+  outputSchema: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' } } } },
+  annotations: { readOnlyHint: true },
+})
+```
+
+Publishing a schema validates nothing; `input: jsonSchema(schema)` validates and publishes. See
+[API descriptions](api-descriptions.md).
+
 ### Profile
 
 `name` and `icon` tell the Hub app how to show your service:
@@ -274,7 +290,9 @@ Any client that speaks [Channel](https://github.com/v57/channel) can act as a se
    `challenge` comes from the same answer and works once, `expiry` is a Unix time in seconds (at most 60 s ahead; the SDK
    uses now + 30 s), `signature` is the Ed25519 signature of `hub1:<key>:<challenge>:<expiry>`, and all keys are base64.
 2. Send `hub/profile/update` with `{ name, icon }` (only when either is set).
-3. Send `hub/service/update` with `{ services: [{ path, permissions, limit }], apps: [{ type, name, path, icon?, widget?, web? }] }`.
+3. Send `hub/service/update` with `{ services: [{ path, permissions, limit, kind?, title?, description?, inputSchema?,
+   outputSchema?, annotations? }], apps: [{ type, name, path, icon?, widget?, web? }] }` (one header per path and kind;
+   the description fields are optional, `Docs/Devices/protocol.md` section 15).
 4. Answer the post and stream requests for those paths.
 
 The hub forgets a connection's services when it disconnects, so steps 1 to 3 run again on every
